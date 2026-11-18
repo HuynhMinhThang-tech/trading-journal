@@ -90,7 +90,10 @@ export default function App() {
   const fetchWorkspace = useCallback(async () => {
     try {
       const res = await fetch('/api/workspace');
-      if (!res.ok) throw new Error('Không thể tải dữ liệu từ máy chủ');
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? 'Không thể tải dữ liệu từ máy chủ');
+      }
       const data = await res.json();
       setDataset(data.dataset);
       setError(null);

@@ -1,8 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import fs from 'fs';
 import JSZip from 'jszip';
-import path from 'path';
 import { z } from 'zod';
 import { calculateMetrics } from './src/lib/analytics/metricsEngine.ts';
 import {
@@ -112,14 +110,28 @@ const app = express();
 app.use(express.json({ limit: '6mb' }));
 
 let databaseInitialization: ReturnType<typeof initDatabase> | null = null;
-app.use(async (_req, _res, next) => {
+app.use(async (req, res, next) => {
   try {
     if (!databaseInitialization) {
       databaseInitialization = initDatabase();
     }
-    await databaseInitialization;
+    const status = await databaseInitialization;
+    if (!status.connected && status.error) {
+      // Lỗi kết nối thật (không phải thiếu DATABASE_URL): cho phép thử lại ở request sau.
+      databaseInitialization = null;
+    }
+    // Trên Vercel, bộ nhớ tạm của function sẽ mất sau mỗi lần khởi động lại,
+    // nên báo lỗi rõ ràng thay vì âm thầm ghi dữ liệu vào bộ nhớ tạm.
+    if (process.env.VERCEL && !status.connected && req.path !== '/api/health') {
+      return res.status(503).json({
+        error: status.error
+          ? `Không kết nối được cơ sở dữ liệu Neon: ${status.error}`
+          : 'Chưa cấu hình DATABASE_URL trên Vercel (Settings → Environment Variables).',
+      });
+    }
     next();
   } catch (error) {
+    databaseInitialization = null;
     next(error);
   }
 });
@@ -520,43 +532,6 @@ app.use(async (_req, _res, next) => {
     } catch (err) {
       console.error('Data ZIP export error:', err);
       return res.status(500).json({ error: 'Không thể tạo file ZIP dữ liệu.' });
-    }
-  });
-
-  app.get('/api/export/project-zip', async (_req, res) => {
-    try {
-      const rootDir = process.cwd();
-      const zip = new JSZip();
-      const ignoredDirs = new Set(['node_modules', 'dist', '.git', '.aistudio', 'dev-dist']);
-      const ignoredFiles = new Set(['.env', '.DS_Store']);
-
-      const walk = (dir: string, relBase = '') => {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            if (ignoredDirs.has(entry.name)) continue;
-            walk(path.join(dir, entry.name), path.join(relBase, entry.name));
-          } else if (entry.isFile()) {
-            if (ignoredFiles.has(entry.name) || entry.name.endsWith('.zip')) continue;
-            const fullPath = path.join(dir, entry.name);
-            const relPath = path.join(relBase, entry.name).replace(/\\/g, '/');
-            // Skip large uploaded attachment markdown/screenshots in public/assets/aistudio
-            if (relPath.startsWith('public/assets/aistudio/')) continue;
-            zip.file(relPath, fs.readFileSync(fullPath));
-          }
-        }
-      };
-
-      walk(rootDir);
-      zip.file('neon-schema.sql', BOOTSTRAP_SQL.trim() + '\n');
-
-      const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="nhat-ky-giao-dich-full-project.zip"');
-      return res.send(buf);
-    } catch (err) {
-      console.error('Project ZIP export error:', err);
-      return res.status(500).json({ error: 'Không thể đóng gói file ZIP mã nguồn.' });
     }
   });
 
