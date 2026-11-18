@@ -3,7 +3,6 @@ import express from 'express';
 import fs from 'fs';
 import JSZip from 'jszip';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { z } from 'zod';
 import { calculateMetrics } from './src/lib/analytics/metricsEngine.ts';
 import {
@@ -28,8 +27,6 @@ import {
   updateTradingAccount,
   upsertJournalEntry,
 } from './src/server/store.ts';
-
-const PORT = 3000;
 
 const previewSchema = z.object({
   rawContent: z.string().min(10, 'Nội dung báo cáo quá ngắn'),
@@ -109,11 +106,23 @@ async function fetchWithRetry(url: string, headers: Record<string, string>, retr
   }
 }
 
-async function startServer() {
-  await initDatabase();
+// Vercel detects this root-level Express entrypoint and deploys it as one Function.
+// Database initialization is memoized per warm instance so concurrent requests share it.
+const app = express();
+app.use(express.json({ limit: '6mb' }));
 
-  const app = express();
-  app.use(express.json({ limit: '6mb' }));
+let databaseInitialization: ReturnType<typeof initDatabase> | null = null;
+app.use(async (_req, _res, next) => {
+  try {
+    if (!databaseInitialization) {
+      databaseInitialization = initDatabase();
+    }
+    await databaseInitialization;
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
   app.get('/api/health', (_req, res) => {
     const status = getDatabaseStatus();
@@ -551,24 +560,12 @@ async function startServer() {
     }
   });
 
-  // Vite middleware in development; static dist in production
-  const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.resolve('dist'));
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.resolve('dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve('dist/index.html'));
-    });
+// Explicit error handling keeps failed requests isolated within a serverless invocation.
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error:', error);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Lỗi máy chủ. Vui lòng thử lại.' });
   }
+});
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Trading Journal server running at http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+export default app;

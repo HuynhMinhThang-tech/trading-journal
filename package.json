@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
+    "dev": "tsx dev-server.ts",
     "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "start": "tsx dev-server.ts",
+    "preview": "vite preview --outDir public",
+    "clean": "node scripts/clean-build.mjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -7,6 +7,12 @@ import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
+    // Vite copies tracked source assets from static-assets into Vercel's public directory.
+    publicDir: path.resolve(__dirname, 'static-assets'),
+    build: {
+      outDir: 'public',
+      emptyOutDir: true,
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -82,7 +88,7 @@ export default defineConfig(() => {
           type: 'module',
         },
       }),
-      // Copies src/assets into dist/ so root-relative URLs like
+      // Copies src/assets into public/ so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.
       {
@@ -92,7 +98,7 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
+          const distDir = path.resolve(__dirname, 'public');
           const srcAssets = path.resolve(__dirname, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {

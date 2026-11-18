@@ -1,0 +1,223 @@
+diff --git a/.gitignore b/.gitignore
+index 5e87a77..956b6aa 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -8,3 +8,4 @@ coverage/
+ !.env.example
+ samples/private/
+ *.eml
++public/
+diff --git a/dev-server.ts b/dev-server.ts
+new file mode 100644
+index 0000000..1801755
+--- /dev/null
++++ b/dev-server.ts
+@@ -0,0 +1,24 @@
++import 'dotenv/config';
++import { createServer as createViteServer } from 'vite';
++import app from './server.ts';
++
++const port = Number(process.env.PORT || 3000);
++
++async function startDevelopmentServer() {
++  const vite = await createViteServer({
++    server: { middlewareMode: true },
++    appType: 'spa',
++  });
++
++  // Register Vite after the API routes so /api/* remains handled by Express.
++  app.use(vite.middlewares);
++
++  app.listen(port, '0.0.0.0', () => {
++    console.log(`Trading Journal development server: http://localhost:${port}`);
++  });
++}
++
++startDevelopmentServer().catch((error) => {
++  console.error('Could not start Trading Journal development server:', error);
++  process.exitCode = 1;
++});
+diff --git a/package.json b/package.json
+index 052bd86..8252372 100644
+--- a/package.json
++++ b/package.json
+@@ -4,11 +4,11 @@
+   "version": "0.0.0",
+   "type": "module",
+   "scripts": {
+-    "dev": "tsx server.ts",
+-    "start": "node server.ts",
++    "dev": "tsx dev-server.ts",
+     "build": "vite build",
+-    "preview": "vite preview",
+-    "clean": "rm -rf dist server.js",
++    "start": "tsx dev-server.ts",
++    "preview": "vite preview --outDir public",
++    "clean": "node scripts/clean-build.mjs",
+     "lint": "tsc --noEmit"
+   },
+   "dependencies": {
+diff --git a/scripts/clean-build.mjs b/scripts/clean-build.mjs
+new file mode 100644
+index 0000000..3aeca6d
+--- /dev/null
++++ b/scripts/clean-build.mjs
+@@ -0,0 +1,4 @@
++import fs from 'node:fs';
++
++// Remove only generated Vercel static output; keep source assets in static-assets/.
++fs.rmSync('public', { recursive: true, force: true });
+diff --git a/server.ts b/server.ts
+index 3f839c9..3422d13 100644
+--- a/server.ts
++++ b/server.ts
+@@ -3,7 +3,6 @@ import express from 'express';
+ import fs from 'fs';
+ import JSZip from 'jszip';
+ import path from 'path';
+-import { createServer as createViteServer } from 'vite';
+ import { z } from 'zod';
+ import { calculateMetrics } from './src/lib/analytics/metricsEngine.ts';
+ import {
+@@ -29,8 +28,6 @@ import {
+   upsertJournalEntry,
+ } from './src/server/store.ts';
+ 
+-const PORT = 3000;
+-
+ const previewSchema = z.object({
+   rawContent: z.string().min(10, 'Nội dung báo cáo quá ngắn'),
+   mode: z.enum(['auto', 'text', 'html', 'eml']).optional().default('auto'),
+@@ -109,11 +106,23 @@ async function fetchWithRetry(url: string, headers: Record<string, string>, retr
+   }
+ }
+ 
+-async function startServer() {
+-  await initDatabase();
++// Vercel detects this root-level Express entrypoint and deploys it as one Function.
++// Database initialization is memoized per warm instance so concurrent requests share it.
++const app = express();
++app.use(express.json({ limit: '6mb' }));
+ 
+-  const app = express();
+-  app.use(express.json({ limit: '6mb' }));
++let databaseInitialization: ReturnType<typeof initDatabase> | null = null;
++app.use(async (_req, _res, next) => {
++  try {
++    if (!databaseInitialization) {
++      databaseInitialization = initDatabase();
++    }
++    await databaseInitialization;
++    next();
++  } catch (error) {
++    next(error);
++  }
++});
+ 
+   app.get('/api/health', (_req, res) => {
+     const status = getDatabaseStatus();
+@@ -551,24 +560,12 @@ async function startServer() {
+     }
+   });
+ 
+-  // Vite middleware in development; static dist in production
+-  const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.resolve('dist'));
+-  if (!isProd) {
+-    const vite = await createViteServer({
+-      server: { middlewareMode: true },
+-      appType: 'spa',
+-    });
+-    app.use(vite.middlewares);
+-  } else {
+-    app.use(express.static(path.resolve('dist')));
+-    app.get('*', (_req, res) => {
+-      res.sendFile(path.resolve('dist/index.html'));
+-    });
++// Explicit error handling keeps failed requests isolated within a serverless invocation.
++app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
++  console.error('Unhandled API error:', error);
++  if (!res.headersSent) {
++    res.status(500).json({ error: 'Lỗi máy chủ. Vui lòng thử lại.' });
+   }
++});
+ 
+-  app.listen(PORT, '0.0.0.0', () => {
+-    console.log(`Trading Journal server running at http://localhost:${PORT}`);
+-  });
+-}
+-
+-startServer();
++export default app;
+diff --git a/public/apple-touch-icon.png b/static-assets/apple-touch-icon.png
+similarity index 100%
+rename from public/apple-touch-icon.png
+rename to static-assets/apple-touch-icon.png
+diff --git a/public/assets/aistudio/Trading_Journal_Antigravity_Prompt_Pack_02347be1.md b/static-assets/assets/aistudio/Trading_Journal_Antigravity_Prompt_Pack_02347be1.md
+similarity index 100%
+rename from public/assets/aistudio/Trading_Journal_Antigravity_Prompt_Pack_02347be1.md
+rename to static-assets/assets/aistudio/Trading_Journal_Antigravity_Prompt_Pack_02347be1.md
+diff --git a/public/assets/aistudio/image_055f9456.png b/static-assets/assets/aistudio/image_055f9456.png
+similarity index 100%
+rename from public/assets/aistudio/image_055f9456.png
+rename to static-assets/assets/aistudio/image_055f9456.png
+diff --git a/public/icon.svg b/static-assets/icon.svg
+similarity index 100%
+rename from public/icon.svg
+rename to static-assets/icon.svg
+diff --git a/public/pwa-192x192.png b/static-assets/pwa-192x192.png
+similarity index 100%
+rename from public/pwa-192x192.png
+rename to static-assets/pwa-192x192.png
+diff --git a/public/pwa-512x512.png b/static-assets/pwa-512x512.png
+similarity index 100%
+rename from public/pwa-512x512.png
+rename to static-assets/pwa-512x512.png
+diff --git a/public/pwa-maskable-512x512.png b/static-assets/pwa-maskable-512x512.png
+similarity index 100%
+rename from public/pwa-maskable-512x512.png
+rename to static-assets/pwa-maskable-512x512.png
+diff --git a/vercel.json b/vercel.json
+new file mode 100644
+index 0000000..10d773a
+--- /dev/null
++++ b/vercel.json
+@@ -0,0 +1,4 @@
++{
++  "$schema": "https://openapi.vercel.sh/vercel.json",
++  "buildCommand": "npm run build"
++}
+diff --git a/vite.config.ts b/vite.config.ts
+index 0bc5e51..5765acb 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -7,6 +7,12 @@ import {VitePWA} from 'vite-plugin-pwa';
+ 
+ export default defineConfig(() => {
+   return {
++    // Vite copies tracked source assets from static-assets into Vercel's public directory.
++    publicDir: path.resolve(__dirname, 'static-assets'),
++    build: {
++      outDir: 'public',
++      emptyOutDir: true,
++    },
+     plugins: [
+       react(),
+       tailwindcss(),
+@@ -82,7 +88,7 @@ export default defineConfig(() => {
+           type: 'module',
+         },
+       }),
+-      // Copies src/assets into dist/ so root-relative URLs like
++      // Copies src/assets into public/ so root-relative URLs like
+       // "/src/assets/images/..." (e.g. generate_image output) still resolve
+       // in production builds. Do not remove.
+       {
+@@ -92,7 +98,7 @@ export default defineConfig(() => {
+           if (error) {
+             return;
+           }
+-          const distDir = path.resolve(__dirname, 'dist');
++          const distDir = path.resolve(__dirname, 'public');
+           const srcAssets = path.resolve(__dirname, 'src/assets');
+           const distAssets = path.resolve(distDir, 'src/assets');
+           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
