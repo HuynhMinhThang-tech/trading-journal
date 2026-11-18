@@ -1,0 +1,8 @@
+{
+  "name": "Nhật Ký Giao Dịch - Trading Journal",
+  "description": "Nhật ký giao dịch cá nhân đọc email Daily Confirmation từ Gmail, nghiên cứu hành động giá, lưu trữ Neon PostgreSQL và hỗ trợ iPhone PWA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

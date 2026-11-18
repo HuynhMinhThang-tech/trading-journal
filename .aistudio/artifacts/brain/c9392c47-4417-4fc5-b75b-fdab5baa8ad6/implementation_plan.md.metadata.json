@@ -1,0 +1,6 @@
+{
+  "summary": "Bản kế hoạch cập nhật: nhấn mạnh chỉ lấy dữ liệu từ email Daily Confirmation trong Gmail (không kết nối trực tiếp sàn Vantage), kết hợp đầy đủ công thức tính toán chuẩn xác theo tài liệu, sổ nghiên cứu hành động giá/phương pháp, Neon PostgreSQL, giao diện Claude Sáng/Tối tiếng Việt và iPhone PWA.",
+  "updatedAt": "2026-11-18T01:15:52.383870855Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
