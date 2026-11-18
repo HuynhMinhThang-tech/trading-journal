@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx dev-server.ts",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-api.mjs",
     "start": "tsx dev-server.ts",
     "preview": "vite preview --outDir public",
     "clean": "node scripts/clean-build.mjs",
