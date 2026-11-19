@@ -4,7 +4,6 @@ import {
   BookOpen,
   CandlestickChart,
   LayoutDashboard,
-  Mail,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -15,11 +14,12 @@ import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { DiaryView } from './components/DiaryView.tsx';
 import { OfflineIndicator } from './components/OfflineIndicator.tsx';
 import { OverviewView } from './components/OverviewView.tsx';
-import { PWAInstallButton } from './components/PWAInstallButton.tsx';
 import { ResearchView } from './components/ResearchView.tsx';
 import { SyncAndSettingsView } from './components/SyncAndSettingsView.tsx';
+import { useAutoGmailSync } from './hooks/useAutoGmailSync.ts';
 import { useSwipeTabs } from './hooks/useSwipeTabs.ts';
 import { calculateMetrics } from './lib/analytics/metricsEngine.ts';
+import { addDaysIso, isoFromRaw, todayIso } from './lib/dateUtils.ts';
 import type {
   JournalEntry,
   PriceObservation,
@@ -28,6 +28,20 @@ import type {
 } from './shared/types.ts';
 
 type TabId = 'overview' | 'diary' | 'research' | 'analytics' | 'sync_settings';
+type RangePreset = 'ALL' | '7D' | '30D' | '90D' | 'CUSTOM';
+
+const RANGE_PRESET_OPTIONS: Array<{ id: RangePreset; label: string }> = [
+  { id: 'ALL', label: 'Tất cả thời gian' },
+  { id: '7D', label: '7 ngày gần nhất' },
+  { id: '30D', label: '30 ngày gần nhất' },
+  { id: '90D', label: '90 ngày gần nhất' },
+  { id: 'CUSTOM', label: 'Tùy chọn khoảng ngày' },
+];
+
+const PRESET_DAYS: Record<'7D' | '30D' | '90D', number> = { '7D': 7, '30D': 30, '90D': 90 };
+
+const FILTER_FIELD_CLASS =
+  'rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-2.5 py-1.5 text-xs font-medium min-h-[34px]';
 
 const NAV_ITEMS: Array<{
   id: TabId;
@@ -42,11 +56,6 @@ const NAV_ITEMS: Array<{
   { id: 'sync_settings', label: 'Đồng bộ & Cài đặt', mobileLabel: 'Cài đặt', icon: SlidersHorizontal },
 ];
 
-function extractIsoDateFromRaw(raw: string): string {
-  const m = raw.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.slice(0, 10);
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -55,9 +64,14 @@ export default function App() {
   });
 
   // Global shared filters across Overview / Diary / Analytics
-  const [dateRangeFilter, setDateRangeFilter] = useState<'ALL' | '7D' | '30D' | '90D'>('ALL');
+  const [rangePreset, setRangePreset] = useState<RangePreset>('ALL');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
   const [accountFilter, setAccountFilter] = useState<string>('ALL');
   const [symbolFilter, setSymbolFilter] = useState<string>('ALL');
+
+  // Ngày được chọn từ lịch Tổng quan để mở thẳng trong Nhật ký giao dịch
+  const [diaryDay, setDiaryDay] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'light';
@@ -109,41 +123,65 @@ export default function App() {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
+  // Tự quét Gmail khi mở ứng dụng (lịch chạy nền hằng ngày nằm ở máy chủ)
+  useAutoGmailSync(fetchWorkspace);
+
+  useEffect(() => {
+    if (activeTab !== 'diary') setDiaryDay(null);
+  }, [activeTab]);
+
   const availableSymbols = useMemo(() => {
     if (!dataset) return ['ALL'];
     const set = new Set(dataset.trades.map((t) => t.symbol));
     return ['ALL', ...Array.from(set)];
   }, [dataset]);
 
-  const cutoffDateStr = useMemo(() => {
-    if (dateRangeFilter === 'ALL') return null;
-    const days = dateRangeFilter === '7D' ? 7 : dateRangeFilter === '30D' ? 30 : 90;
-    const d = new Date();
-    d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
-  }, [dateRangeFilter]);
+  const applyRangePreset = (preset: RangePreset) => {
+    setRangePreset(preset);
+    if (preset === 'ALL') {
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset !== 'CUSTOM') {
+      const today = todayIso();
+      setDateFrom(addDaysIso(today, -(PRESET_DAYS[preset] - 1)));
+      setDateTo(today);
+    }
+  };
+
+  const handleDateFromChange = (value: string) => {
+    setDateFrom(value);
+    setRangePreset('CUSTOM');
+  };
+
+  const handleDateToChange = (value: string) => {
+    setDateTo(value);
+    setRangePreset('CUSTOM');
+  };
+
+  const isDateInRange = useCallback(
+    (iso: string) => (!dateFrom || iso >= dateFrom) && (!dateTo || iso <= dateTo),
+    [dateFrom, dateTo],
+  );
 
   const filteredTrades = useMemo(() => {
     if (!dataset) return [];
     return dataset.trades.filter((t) => {
       if (accountFilter !== 'ALL' && t.accountId !== accountFilter) return false;
       if (symbolFilter !== 'ALL' && t.symbol !== symbolFilter) return false;
-      if (cutoffDateStr) {
-        const tradeDate = extractIsoDateFromRaw(t.closeTimeRaw ?? t.openTimeRaw);
-        if (tradeDate < cutoffDateStr) return false;
-      }
-      return true;
+      return isDateInRange(isoFromRaw(t.closeTimeRaw ?? t.openTimeRaw));
     });
-  }, [dataset, accountFilter, symbolFilter, cutoffDateStr]);
+  }, [dataset, accountFilter, symbolFilter, isDateInRange]);
 
-  const filteredSnapshots = useMemo(() => {
+  // Số dư hiển thị luôn lấy mốc mới nhất, chỉ phụ thuộc bộ lọc tài khoản (không theo khoảng ngày)
+  const balanceSnapshots = useMemo(() => {
     if (!dataset) return [];
-    return dataset.snapshots.filter((s) => {
-      if (accountFilter !== 'ALL' && s.accountId !== accountFilter) return false;
-      if (cutoffDateStr && s.reportDate < cutoffDateStr) return false;
-      return true;
-    });
-  }, [dataset, accountFilter, cutoffDateStr]);
+    return dataset.snapshots.filter((s) => accountFilter === 'ALL' || s.accountId === accountFilter);
+  }, [dataset, accountFilter]);
+
+  const filteredSnapshots = useMemo(
+    () => balanceSnapshots.filter((s) => isDateInRange(s.reportDate)),
+    [balanceSnapshots, isDateInRange],
+  );
 
   const filteredMetrics = useMemo(() => {
     if (!dataset) return null;
@@ -198,6 +236,11 @@ export default function App() {
       method: 'DELETE',
     });
     if (res.ok) await fetchWorkspace();
+  };
+
+  const openDiaryDay = (iso: string) => {
+    setDiaryDay(iso);
+    setActiveTab('diary');
   };
 
   const activeNav = NAV_ITEMS.find((n) => n.id === activeTab) ?? NAV_ITEMS[0];
@@ -280,7 +323,7 @@ export default function App() {
           })}
         </nav>
 
-        <div className="p-3 border-t border-[#E7E5E0] dark:border-[#32302B] space-y-2.5 flex flex-col items-center">
+        <div className="p-3 border-t border-[#E7E5E0] dark:border-[#32302B] flex flex-col items-center">
           <button
             type="button"
             onClick={toggleTheme}
@@ -299,10 +342,6 @@ export default function App() {
               <Moon className="w-4 h-4 text-[#D97757] shrink-0" />
             )}
           </button>
-
-          <div className="w-full flex justify-center">
-            <PWAInstallButton iconOnly={sidebarCollapsed} />
-          </div>
         </div>
       </aside>
 
@@ -317,9 +356,6 @@ export default function App() {
           <h1 className="text-base sm:text-lg font-semibold truncate">{activeNav.label}</h1>
 
           <div className="flex items-center gap-2 shrink-0">
-            <div className="lg:hidden">
-              <PWAInstallButton compact />
-            </div>
             <button
               type="button"
               onClick={toggleTheme}
@@ -331,14 +367,6 @@ export default function App() {
               ) : (
                 <Sun className="w-4 h-4 text-[#D97757]" />
               )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('sync_settings')}
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-[#C96442] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#B55535] transition-colors whitespace-nowrap min-h-[38px]"
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span>Đồng bộ Email</span>
             </button>
           </div>
         </header>
@@ -352,36 +380,50 @@ export default function App() {
         {/* Global Shared Query Filter Bar */}
         {dataset && showGlobalFilters && dataset.imports.length > 0 && (
           <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl w-full mx-auto">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-4 py-2.5 text-xs">
-              <div className="inline-flex rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1">
-                {(
-                  [
-                    { id: 'ALL', label: 'Tất cả' },
-                    { id: '7D', label: '7 ngày' },
-                    { id: '30D', label: '30 ngày' },
-                    { id: '90D', label: '90 ngày' },
-                  ] as const
-                ).map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => setDateRangeFilter(r.id)}
-                    className={`px-2.5 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
-                      dateRangeFilter === r.id
-                        ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                        : 'text-[#6B6963] dark:text-[#A6A39B]'
-                    }`}
-                  >
-                    {r.label}
-                  </button>
+            <div
+              data-no-swipe
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-4 py-2.5 text-xs"
+            >
+              <select
+                value={rangePreset}
+                onChange={(e) => applyRangePreset(e.target.value as RangePreset)}
+                aria-label="Khoảng thời gian"
+                className={FILTER_FIELD_CLASS}
+              >
+                {RANGE_PRESET_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
                 ))}
-              </div>
+              </select>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 text-[#6B6963] dark:text-[#A6A39B]">
+                <span>Từ</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(e) => handleDateFromChange(e.target.value)}
+                  className={`${FILTER_FIELD_CLASS} font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]`}
+                />
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-[#6B6963] dark:text-[#A6A39B]">
+                <span>đến</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(e) => handleDateToChange(e.target.value)}
+                  className={`${FILTER_FIELD_CLASS} font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]`}
+                />
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <select
                   value={accountFilter}
                   onChange={(e) => setAccountFilter(e.target.value)}
-                  className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-2.5 py-1.5 text-xs font-medium"
+                  aria-label="Tài khoản"
+                  className={FILTER_FIELD_CLASS}
                 >
                   <option value="ALL">Tất cả tài khoản</option>
                   {dataset.accounts.map((a) => (
@@ -394,11 +436,12 @@ export default function App() {
                 <select
                   value={symbolFilter}
                   onChange={(e) => setSymbolFilter(e.target.value)}
-                  className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-2.5 py-1.5 text-xs font-medium"
+                  aria-label="Mã giao dịch"
+                  className={FILTER_FIELD_CLASS}
                 >
-                  {availableSymbols.map((s) => (
-                    <option key={s} value={s}>
-                      {s === 'ALL' ? 'Mọi mã giao dịch' : s}
+                  {availableSymbols.map((sym) => (
+                    <option key={sym} value={sym}>
+                      {sym === 'ALL' ? 'Mọi mã giao dịch' : sym}
                     </option>
                   ))}
                 </select>
@@ -418,7 +461,7 @@ export default function App() {
               <div className="h-64 rounded-xl bg-[#F3F1EC] dark:bg-[#22211E] animate-pulse" />
             </div>
           ) : error ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-6 text-sm text-[#B91C1C] dark:text-[#F87171]">
+            <div className="rounded-xl border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-6 text-sm text-loss">
               <p className="font-semibold">{error}</p>
               <button
                 type="button"
@@ -434,13 +477,19 @@ export default function App() {
                 <OverviewView
                   dataset={dataset}
                   trades={filteredTrades}
-                  snapshots={filteredSnapshots}
+                  balanceSnapshots={balanceSnapshots}
                   metrics={filteredMetrics}
                   onNavigate={(t) => setActiveTab(t as TabId)}
+                  onOpenDiaryDay={openDiaryDay}
                 />
               )}
               {activeTab === 'diary' && (
-                <DiaryView trades={filteredTrades} onSaveJournal={handleSaveJournal} />
+                <DiaryView
+                  trades={filteredTrades}
+                  focusDay={diaryDay}
+                  onClearFocusDay={() => setDiaryDay(null)}
+                  onSaveJournal={handleSaveJournal}
+                />
               )}
               {activeTab === 'research' && (
                 <ResearchView

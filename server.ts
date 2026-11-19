@@ -4,13 +4,17 @@ import JSZip from 'jszip';
 import { z } from 'zod';
 import { calculateMetrics } from './src/lib/analytics/metricsEngine.ts';
 import {
-  extractBodiesFromGmailPayload,
   parseVantageAnyInput,
   parseVantageEml,
   parseVantageHtml,
   parseVantagePlainText,
-  type GmailPayloadPart,
 } from './src/lib/parser/vantageParser.ts';
+import {
+  GmailSyncError,
+  getGmailMailboxEmail,
+  isGmailConfigured,
+  runGmailSync,
+} from './src/server/gmailSync.ts';
 import {
   BOOTSTRAP_SQL,
   commitParsedStatement,
@@ -19,7 +23,6 @@ import {
   getDatabaseStatus,
   getWorkspaceDataset,
   initDatabase,
-  recordSyncLog,
   resolveReviewItem,
   updatePriceObservation,
   updateTradingAccount,
@@ -40,6 +43,7 @@ const commitSchema = z.object({
 const gmailSyncSchema = z.object({
   days: z.number().int().min(1).max(365).optional().default(14),
   dryRun: z.boolean().optional().default(false),
+  trigger: z.enum(['manual', 'auto']).optional().default('manual'),
 });
 
 const journalSchema = z.object({
@@ -90,18 +94,6 @@ function parseByMode(rawContent: string, mode: 'auto' | 'text' | 'html' | 'eml')
   if (mode === 'html') return parseVantageHtml(rawContent, 'html');
   if (mode === 'eml') return parseVantageEml(rawContent).statement;
   return parseVantageAnyInput(rawContent);
-}
-
-async function fetchWithRetry(url: string, headers: Record<string, string>, retries = 2): Promise<Response> {
-  let attempt = 0;
-  while (true) {
-    const res = await fetch(url, { headers });
-    if (res.ok || (res.status !== 429 && res.status < 500) || attempt >= retries) {
-      return res;
-    }
-    attempt++;
-    await new Promise((r) => setTimeout(r, 400 * Math.pow(2, attempt)));
-  }
 }
 
 // Vercel detects this root-level Express entrypoint and deploys it as one Function.
@@ -191,185 +183,65 @@ app.use(async (req, res, next) => {
     }
   });
 
-  app.post('/api/gmail/sync', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Thiếu access token Gmail. Vui lòng kết nối lại Gmail.' });
+  function sendGmailError(res: express.Response, err: unknown) {
+    if (err instanceof GmailSyncError) {
+      return res.status(err.status).json({
+        error: err.message,
+        needsReauth: err.needsReauth,
+        notConfigured: err.status === 503,
+      });
     }
+    console.error('Gmail sync error:', err);
+    return res.status(500).json({ error: 'Lỗi máy chủ khi đồng bộ Gmail.' });
+  }
+
+  // Trạng thái kết nối Gmail phía máy chủ (không trả về bất kỳ khóa bí mật nào).
+  app.get('/api/gmail/status', async (_req, res) => {
+    if (!isGmailConfigured()) {
+      return res.json({ configured: false, email: null, error: null });
+    }
+    try {
+      const email = await getGmailMailboxEmail();
+      return res.json({ configured: true, email, error: null });
+    } catch (err) {
+      return res.json({
+        configured: true,
+        email: null,
+        error: err instanceof GmailSyncError ? err.message : 'Không kiểm tra được kết nối Gmail.',
+      });
+    }
+  });
+
+  // Đồng bộ thủ công (nút bấm) hoặc tự động khi mở ứng dụng. Dùng thông tin đăng nhập lưu trên máy chủ.
+  app.post('/api/gmail/sync', async (req, res) => {
     const parsedBody = gmailSyncSchema.safeParse(req.body ?? {});
     if (!parsedBody.success) {
       return res.status(400).json({ error: 'Tham số đồng bộ không hợp lệ.' });
     }
-
-    const { days, dryRun } = parsedBody.data;
-    const headers = { Authorization: authHeader };
-
+    // Tự động quét khi mở ứng dụng mà chưa cấu hình Gmail: bỏ qua êm, không trả lỗi.
+    if (parsedBody.data.trigger === 'auto' && !isGmailConfigured()) {
+      return res.json({ skipped: true, imported: 0, partial: 0, message: 'Gmail chưa được cấu hình.' });
+    }
     try {
-      const query = encodeURIComponent(`from:support@vantagemarkets.com subject:"Daily Confirmation" newer_than:${days}d`);
-      const listRes = await fetchWithRetry(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=50`,
-        headers,
-      );
-
-      if (listRes.status === 401 || listRes.status === 403) {
-        return res.status(listRes.status).json({
-          error: 'Phiên cấp quyền Gmail đã hết hạn hoặc thiếu quyền đọc thư. Vui lòng kết nối lại Gmail.',
-          needsReauth: true,
-        });
-      }
-      if (!listRes.ok) {
-        return res.status(502).json({ error: `Gmail API trả về lỗi (${listRes.status}).` });
-      }
-
-      const listData = (await listRes.json()) as { messages?: Array<{ id: string; threadId: string }> };
-      const messageRefs = listData.messages ?? [];
-
-      if (messageRefs.length === 0) {
-        await recordSyncLog({
-          source: 'gmail',
-          gmailMessageId: null,
-          sender: 'support@vantagemarkets.com',
-          subject: 'Daily Confirmation',
-          emailDateHeader: null,
-          reportTimestampRaw: null,
-          accountNumber: null,
-          ordersCount: 0,
-          dealsCount: 0,
-          status: 'no_new_email',
-          message: `Không tìm thấy email Daily Confirmation mới trong ${days} ngày gần nhất.`,
-        });
-        return res.json({
-          scanned: 0,
-          imported: 0,
-          partial: 0,
-          skippedDuplicate: 0,
-          rejected: 0,
-          previews: [],
-          message: `Không có email Daily Confirmation mới trong ${days} ngày qua (không tự ghi P/L = 0).`,
-        });
-      }
-
-      let imported = 0;
-      let partial = 0;
-      let skippedDuplicate = 0;
-      let rejected = 0;
-      const previews: Array<{
-        messageId: string;
-        emailDate: string;
-        accountNumber: string;
-        reportTimestampRaw: string;
-        ordersCount: number;
-        dealsCount: number;
-        status: string;
-        message: string;
-      }> = [];
-
-      for (const ref of messageRefs) {
-        const msgRes = await fetchWithRetry(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${ref.id}?format=full`,
-          headers,
-        );
-        if (!msgRes.ok) continue;
-        const msgData = (await msgRes.json()) as {
-          id: string;
-          internalDate?: string;
-          payload?: GmailPayloadPart;
-        };
-
-        const hdrs = msgData.payload?.headers ?? [];
-        const getHdr = (name: string) =>
-          hdrs.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? '';
-        const fromHdr = getHdr('From');
-        const subjectHdr = getHdr('Subject');
-        const dateHdr = getHdr('Date');
-
-        // Strict verification of sender & subject
-        if (
-          !fromHdr.toLowerCase().includes('vantagemarkets.com') ||
-          !subjectHdr.toLowerCase().includes('daily confirmation')
-        ) {
-          rejected++;
-          await recordSyncLog({
-            source: 'gmail',
-            gmailMessageId: msgData.id,
-            sender: fromHdr,
-            subject: subjectHdr,
-            emailDateHeader: dateHdr,
-            reportTimestampRaw: null,
-            accountNumber: null,
-            ordersCount: 0,
-            dealsCount: 0,
-            status: 'rejected',
-            message: 'Bỏ qua thư vì người gửi hoặc tiêu đề không khớp mẫu Daily Confirmation.',
-          });
-          continue;
-        }
-
-        const { htmlBody, textBody } = extractBodiesFromGmailPayload(msgData.payload);
-        const statement = htmlBody
-          ? parseVantageHtml(htmlBody, 'gmail')
-          : textBody
-            ? parseVantagePlainText(textBody, 'gmail')
-            : null;
-
-        if (!statement) {
-          rejected++;
-          continue;
-        }
-
-        if (dryRun) {
-          previews.push({
-            messageId: msgData.id,
-            emailDate: dateHdr,
-            accountNumber: statement.header.accountNumber,
-            reportTimestampRaw: statement.header.reportTimestampRaw,
-            ordersCount: statement.orders.length,
-            dealsCount: statement.deals.length,
-            status: statement.validationStatus,
-            message: 'Xem trước thành công (chưa ghi vào database).',
-          });
-          continue;
-        }
-
-        const outcome = await commitParsedStatement(statement, {
-          source: 'gmail',
-          gmailMessageId: msgData.id,
-          sender: fromHdr,
-          subject: subjectHdr,
-          emailDateHeader: dateHdr,
-        });
-
-        if (outcome.status === 'imported') imported++;
-        else if (outcome.status === 'partial') partial++;
-        else if (outcome.status === 'skipped_duplicate') skippedDuplicate++;
-        else rejected++;
-
-        previews.push({
-          messageId: msgData.id,
-          emailDate: dateHdr,
-          accountNumber: statement.header.accountNumber,
-          reportTimestampRaw: statement.header.reportTimestampRaw,
-          ordersCount: statement.orders.length,
-          dealsCount: statement.deals.length,
-          status: outcome.status,
-          message: outcome.message,
-        });
-      }
-
-      return res.json({
-        scanned: messageRefs.length,
-        imported,
-        partial,
-        skippedDuplicate,
-        rejected,
-        previews,
-        message: dryRun
-          ? `Đã quét thử ${messageRefs.length} email (Dry-run).`
-          : `Đồng bộ xong ${messageRefs.length} email: ${imported} mới, ${partial} có cảnh báo, ${skippedDuplicate} đã có sẵn.`,
-      });
+      const result = await runGmailSync(parsedBody.data);
+      return res.json(result);
     } catch (err) {
-      console.error('Gmail sync error:', err);
-      return res.status(500).json({ error: 'Lỗi máy chủ khi đồng bộ Gmail.' });
+      return sendGmailError(res, err);
+    }
+  });
+
+  // Vercel Cron gọi định kỳ (xem vercel.json). Nếu đặt CRON_SECRET, Vercel tự gửi kèm
+  // header Authorization: Bearer <CRON_SECRET>.
+  app.get('/api/cron/gmail-sync', async (req, res) => {
+    const secret = process.env.CRON_SECRET?.trim();
+    if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+      const result = await runGmailSync({ days: 3, dryRun: false, trigger: 'cron' });
+      return res.json(result);
+    } catch (err) {
+      return sendGmailError(res, err);
     }
   });
 

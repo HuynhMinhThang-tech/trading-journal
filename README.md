@@ -18,3 +18,32 @@ View your app in AI Studio: https://ai.studio/apps/c9392c47-4417-4fc5-b75b-fdab5
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Đồng bộ Gmail tự động
+
+Ứng dụng đọc email **Daily Confirmation** của Vantage (`from:support@vantagemarkets.com`) hoàn toàn phía máy chủ,
+không cần đăng nhập hay bấm nút trên trình duyệt:
+
+- **Vercel Cron** gọi `/api/cron/gmail-sync` mỗi ngày lúc 22:30 UTC (sau 23:59 giờ sàn) và 11:00 UTC (quét bù) — xem `vercel.json`.
+- Mỗi lần mở ứng dụng, giao diện cũng quét nhẹ 3 ngày gần nhất (một lần mỗi phiên).
+- Mọi lần quét đều chống trùng theo ID email và checksum nên chạy lặp lại là an toàn.
+
+### Cấu hình một lần
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → chọn project → **APIs & Services → Library** → bật **Gmail API**.
+2. **OAuth consent screen**: thêm scope `https://www.googleapis.com/auth/gmail.readonly`, thêm Gmail của bạn vào *Test users*,
+   rồi chuyển **Publishing status** sang **In production**.
+   (Nếu để *Testing*, Google sẽ tự thu hồi Refresh Token sau 7 ngày.)
+3. **Credentials → Create credentials → OAuth client ID** → loại **Web application** →
+   *Authorized redirect URIs*: `https://developers.google.com/oauthplayground`. Lưu lại **Client ID** và **Client secret**.
+4. Mở [OAuth 2.0 Playground](https://developers.google.com/oauthplayground) → biểu tượng bánh răng →
+   tick **Use your own OAuth credentials** → dán Client ID / Client secret →
+   ở ô scope nhập `https://www.googleapis.com/auth/gmail.readonly` → **Authorize APIs** (đăng nhập đúng Gmail nhận email Vantage) →
+   **Exchange authorization code for tokens** → sao chép **Refresh token**.
+5. Trên Vercel (**Settings → Environment Variables**) hoặc file `.env.local` khi chạy local, đặt:
+   `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (và tùy chọn `CRON_SECRET`), rồi **Redeploy**.
+
+Vào tab **Đồng bộ & Cài đặt → Gmail tự động** để thấy trạng thái kết nối, hoặc bấm **Đồng bộ ngay** để quét bù lịch sử.
+Nếu Refresh Token hết hạn / bị thu hồi, tab này sẽ hiện lỗi — chỉ cần lặp lại bước 4 và cập nhật `GMAIL_REFRESH_TOKEN`.
+
+> Thư viện `firebase` không còn được dùng. Bạn có thể gỡ bằng `npm uninstall firebase`.

@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Edit3, Plus, Search, Star, Trash2, X } from 'lucide-react';
+import { CalendarDays, Edit3, List, Plus, Search, Star, Trash2, X } from 'lucide-react';
+import { MonthCalendar } from './MonthCalendar.tsx';
+import { formatIsoDisplay, todayIso } from '../lib/dateUtils.ts';
+import { formatClock } from '../lib/format.ts';
 import type {
   ObservationTimeframe,
   PriceObservation,
@@ -48,16 +51,22 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const [tfFilter, setTfFilter] = useState<'ALL' | ObservationTimeframe>('ALL');
   const [sessionFilter, setSessionFilter] = useState<'ALL' | TradingSessionName>('ALL');
 
+  // Chế độ xem: danh sách (bảng) hoặc lịch
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const initialNow = new Date();
+  const [calYear, setCalYear] = useState(initialNow.getFullYear());
+  const [calMonth, setCalMonth] = useState(initialNow.getMonth());
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form fields
-  const today = new Date().toISOString().slice(0, 10);
-  const nowTime = new Date().toTimeString().slice(0, 5);
   const [symbol, setSymbol] = useState('NAS100ft');
-  const [observedDate, setObservedDate] = useState(today);
-  const [observedTime, setObservedTime] = useState(nowTime);
+  const [observedDate, setObservedDate] = useState(() => todayIso());
+  const [observedTime, setObservedTime] = useState(() => formatClock(new Date()));
   const [timeframe, setTimeframe] = useState<ObservationTimeframe>('M15');
   const [session, setSession] = useState<TradingSessionName>('Mỹ');
   const [priceAction, setPriceAction] = useState('');
@@ -72,7 +81,8 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     return ['ALL', ...Array.from(s)];
   }, [observations]);
 
-  const filtered = useMemo(() => {
+  // Bộ lọc chung (mã / khung / phiên / từ khóa) — dùng cho cả bảng lẫn lịch
+  const baseFiltered = useMemo(() => {
     return observations.filter((o) => {
       if (symbolFilter !== 'ALL' && o.symbol !== symbolFilter) return false;
       if (tfFilter !== 'ALL' && o.timeframe !== tfFilter) return false;
@@ -85,6 +95,37 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       return true;
     });
   }, [observations, symbolFilter, tfFilter, sessionFilter, search]);
+
+  // Bảng: thêm lọc theo ngày khi bấm từ lịch
+  const filtered = useMemo(
+    () => (dayFilter ? baseFiltered.filter((o) => o.observedDate === dayFilter) : baseFiltered),
+    [baseFiltered, dayFilter],
+  );
+
+  // Lịch: gom quan sát theo ngày
+  const byDay = useMemo(() => {
+    const map = new Map<string, PriceObservation[]>();
+    for (const o of baseFiltered) {
+      const list = map.get(o.observedDate) ?? [];
+      list.push(o);
+      map.set(o.observedDate, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.observedTime.localeCompare(b.observedTime));
+    }
+    return map;
+  }, [baseFiltered]);
+
+  const selectedDayItems = selectedDay ? (byDay.get(selectedDay) ?? []) : [];
+
+  const monthObservationCount = useMemo(() => {
+    const prefix = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-`;
+    let count = 0;
+    for (const [day, list] of byDay) {
+      if (day.startsWith(prefix)) count += list.length;
+    }
+    return count;
+  }, [byDay, calYear, calMonth]);
 
   // Pattern / Habit recognition summary from filtered observations
   const habitSummary = useMemo(() => {
@@ -112,11 +153,11 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       .slice(0, 6);
   }, [filtered]);
 
-  const openNewModal = () => {
+  const openNewModal = (presetDate?: string) => {
     setEditingId(null);
     setSymbol('NAS100ft');
-    setObservedDate(new Date().toISOString().slice(0, 10));
-    setObservedTime(new Date().toTimeString().slice(0, 5));
+    setObservedDate(presetDate ?? todayIso());
+    setObservedTime(formatClock(new Date()));
     setTimeframe('M15');
     setSession('Mỹ');
     setPriceAction('');
@@ -176,26 +217,55 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     <div className="space-y-5">
       {/* Header & Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-        <div>
-          <h2 className="text-base font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-            Sổ ghi nhận nghiên cứu & Thói quen hành động giá
-          </h2>
-          <p className="mt-1 text-xs text-[#6B6963] dark:text-[#A6A39B]">
-            Ghi lại mã quan sát, ngày giờ, khung thời gian, phiên (Á/Âu/Mỹ), nến và bối cảnh tin tức để nhận diện quy luật giá lặp lại.
-          </p>
+        <h2 className="text-base font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+          Sổ ghi nhận nghiên cứu & Thói quen hành động giá
+        </h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <div
+            role="tablist"
+            aria-label="Chế độ xem"
+            data-no-swipe
+            className="inline-flex rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1"
+          >
+            {(
+              [
+                { id: 'list', label: 'Danh sách', icon: List },
+                { id: 'calendar', label: 'Lịch', icon: CalendarDays },
+              ] as const
+            ).map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === t.id}
+                  onClick={() => setViewMode(t.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                    viewMode === t.id
+                      ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
+                      : 'text-[#6B6963] dark:text-[#A6A39B]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => openNewModal(viewMode === 'calendar' && selectedDay ? selectedDay : undefined)}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#C96442] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B55535] transition-colors whitespace-nowrap shrink-0 min-h-[44px]"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Ghi nhận quan sát mới</span>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={openNewModal}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#C96442] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B55535] transition-colors whitespace-nowrap shrink-0 min-h-[44px]"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Ghi nhận quan sát mới</span>
-        </button>
       </div>
 
       {/* Habit Recognition Summary */}
-      {habitSummary.length > 0 && (
+      {viewMode === 'list' && habitSummary.length > 0 && (
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold">Tổng hợp thói quen giá nổi bật</h3>
@@ -230,7 +300,10 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       )}
 
       {/* Filter Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
+      <div
+        data-no-swipe
+        className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4"
+      >
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-[#6B6963] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
@@ -243,6 +316,17 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {viewMode === 'list' && dayFilter && (
+            <button
+              type="button"
+              onClick={() => setDayFilter(null)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#C96442]/50 bg-[#C96442]/10 px-3 py-2 text-xs font-medium min-h-[40px]"
+              aria-label="Bỏ lọc theo ngày"
+            >
+              <span className="font-mono-num">Ngày {formatIsoDisplay(dayFilter)}</span>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
           <select
             value={symbolFilter}
             onChange={(e) => setSymbolFilter(e.target.value)}
@@ -283,6 +367,8 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
         </div>
       </div>
 
+      {viewMode === 'list' && (
+      <>
       {/* Desktop Table */}
       <div className="hidden lg:block rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] overflow-hidden">
         <div className="overflow-x-auto">
@@ -304,7 +390,19 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                 <tr key={o.id} className="hover:bg-[#FAF9F5] dark:hover:bg-[#2A2925]/50">
                   <td className="py-3 px-4 font-semibold">{o.symbol}</td>
                   <td className="py-3 px-3 font-mono-num whitespace-nowrap">
-                    <div>{o.observedDate}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const [y, m] = o.observedDate.split('-').map(Number);
+                        setCalYear(y);
+                        setCalMonth(m - 1);
+                        setSelectedDay(o.observedDate);
+                        setViewMode('calendar');
+                      }}
+                      className="hover:text-[#C96442] hover:underline underline-offset-4"
+                    >
+                      {o.observedDate}
+                    </button>
                     <div className="text-[11px] text-[#6B6963] dark:text-[#A6A39B]">{o.observedTime}</div>
                   </td>
                   <td className="py-3 px-3 whitespace-nowrap text-[#6B6963] dark:text-[#A6A39B]">
@@ -344,7 +442,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onDelete(o.id)}
-                        className="p-2 rounded-lg text-[#6B6963] hover:text-[#B91C1C] dark:hover:text-[#F87171] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                        className="p-2 rounded-lg text-[#6B6963] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                         aria-label="Xóa quan sát"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -356,7 +454,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-sm text-[#6B6963]">
-                    Chưa có quan sát hành động giá nào. Bấm "Ghi nhận quan sát mới" để bắt đầu xây kho thói quen giá.
+                    Chưa có quan sát hành động giá nào.
                   </td>
                 </tr>
               )}
@@ -404,7 +502,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               <button
                 type="button"
                 onClick={() => onDelete(o.id)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg text-[#B91C1C] dark:text-[#F87171] border border-[#E7E5E0] dark:border-[#32302B] min-h-[38px]"
+                className="px-3 py-1.5 text-xs font-medium rounded-lg text-loss border border-[#E7E5E0] dark:border-[#32302B] min-h-[38px]"
               >
                 Xóa
               </button>
@@ -417,6 +515,144 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
           </div>
         )}
       </div>
+
+      </>
+      )}
+
+      {viewMode === 'calendar' && (
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 space-y-5">
+          <MonthCalendar
+            year={calYear}
+            month={calMonth}
+            onMonthChange={(y, m) => {
+              setCalYear(y);
+              setCalMonth(m);
+            }}
+            summary={
+              <span className="text-[#6B6963] dark:text-[#A6A39B]">
+                {monthObservationCount} quan sát trong tháng
+              </span>
+            }
+            selectedIso={selectedDay}
+            onDayClick={(iso) => setSelectedDay((prev) => (prev === iso ? null : iso))}
+            getTone={(iso) => (byDay.has(iso) ? 'accent' : null)}
+            renderDay={(iso) => {
+              const items = byDay.get(iso);
+              if (!items || items.length === 0) return null;
+              const first = items[0];
+              const label = first.habitTag.trim() || first.priceAction.trim();
+              return (
+                <>
+                  <span className="hidden sm:block mt-0.5 text-[11px] leading-snug font-medium text-[#1C1B18] dark:text-[#F2EFE9] line-clamp-2 break-words">
+                    {label}
+                  </span>
+                  <span className="mt-auto text-[10px] sm:text-[11px] font-mono-num font-semibold text-[#C96442] dark:text-[#D97757]">
+                    {items.length} quan sát
+                  </span>
+                </>
+              );
+            }}
+          />
+
+          {selectedDay && (
+            <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715]/60 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold font-mono-num">
+                  Ngày {formatIsoDisplay(selectedDay)}
+                  <span className="ml-2 font-normal text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                    {selectedDayItems.length} quan sát
+                  </span>
+                </h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedDayItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDayFilter(selectedDay);
+                        setViewMode('list');
+                      }}
+                      className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-1.5 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[36px] whitespace-nowrap"
+                    >
+                      Xem trong bảng
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openNewModal(selectedDay)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#C96442] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B55535] min-h-[36px] whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Ghi nhận cho ngày này</span>
+                  </button>
+                </div>
+              </div>
+
+              {selectedDayItems.length === 0 ? (
+                <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                  Chưa có quan sát nào trong ngày này.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {selectedDayItems.map((o) => (
+                    <div
+                      key={o.id}
+                      className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-3.5 space-y-1.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs">
+                          <strong className="text-sm">{o.symbol}</strong>
+                          <span className="ml-2 font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                            {o.observedTime} · {o.timeframe} · Phiên {o.session}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="inline-flex items-center gap-1 text-xs font-mono-num text-[#C96442] dark:text-[#D97757] mr-1">
+                            <Star className="w-3.5 h-3.5 fill-current" />
+                            {o.confidence}/5
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(o)}
+                            className="p-2 rounded-lg text-[#6B6963] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                            aria-label="Sửa quan sát"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDelete(o.id)}
+                            className="p-2 rounded-lg text-[#6B6963] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                            aria-label="Xóa quan sát"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium">{o.priceAction}</p>
+                      <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                        <strong>Nến:</strong> {o.candlePattern}
+                      </p>
+                      {o.habitTag && (
+                        <p className="text-xs text-[#C96442] dark:text-[#D97757]">Thói quen: {o.habitTag}</p>
+                      )}
+                      {o.marketContext && (
+                        <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                          <strong>Bối cảnh:</strong> {o.marketContext}
+                        </p>
+                      )}
+                      {o.outcomeNote && (
+                        <p className="text-xs">
+                          <strong>Kết quả:</strong> {o.outcomeNote}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {modalOpen && (

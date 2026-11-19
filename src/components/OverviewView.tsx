@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -8,7 +8,27 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ArrowRight, ArrowUpRight, CircleDollarSign, Mail, Scale, Target, Upload } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  CircleDollarSign,
+  Mail,
+  Scale,
+  Target,
+  Upload,
+  Wallet,
+} from 'lucide-react';
+import { MonthCalendar, type CalendarTone } from './MonthCalendar.tsx';
+import { useIsDark } from '../hooks/useIsDark.ts';
+import {
+  addDaysIso,
+  formatIsoDisplay,
+  formatIsoShort,
+  isoFromRaw,
+  todayIso,
+} from '../lib/dateUtils.ts';
+import { formatCompactMoney, formatUsd } from '../lib/format.ts';
+import { chartColors, pnlBarClass, pnlTextClass } from '../lib/pnl.ts';
 import type {
   AccountSnapshotRecord,
   MetricsSummary,
@@ -19,91 +39,101 @@ import type {
 interface OverviewViewProps {
   dataset: WorkspaceDataset;
   trades: TradeRecord[];
-  snapshots: AccountSnapshotRecord[];
+  /** Mốc số dư đã lọc theo tài khoản (không lọc theo khoảng ngày). */
+  balanceSnapshots: AccountSnapshotRecord[];
   metrics: MetricsSummary;
   onNavigate: (tab: string) => void;
+  /** Mở Nhật ký giao dịch tại một ngày cụ thể (YYYY-MM-DD). */
+  onOpenDiaryDay: (iso: string) => void;
 }
 
-function formatUsd(val: string | number, signed = true): string {
-  const num = typeof val === 'string' ? Number(val) : val;
-  if (Number.isNaN(num)) return '$0.00';
-  const absFormatted = Math.abs(num).toLocaleString('vi-VN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  if (!signed) return `${absFormatted} US$`;
-  const sign = num > 0 ? '+' : num < 0 ? '-' : '';
-  return `${sign}${absFormatted} US$`;
+const BALANCE_WINDOW_DAYS = 7;
+
+interface BalancePoint {
+  date: string;
+  label: string;
+  balance: number | null;
+  /** true nếu ngày này có sao kê thật (không phải số dư giữ nguyên từ ngày trước). */
+  real: boolean;
 }
 
-function formatPrice(raw: string | null): string {
-  if (!raw) return '—';
-  const num = Number(raw);
-  if (Number.isNaN(num)) return raw;
-  return num.toLocaleString('vi-VN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function parseRawTimestampMs(raw: string | null): number | null {
-  if (!raw) return null;
-  const m = raw.trim().match(/^(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (!m) return null;
-  const dt = new Date(
-    Number(m[1]),
-    Number(m[2]) - 1,
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5]),
-    Number(m[6] ?? '0'),
+function groupByAccount(snapshots: AccountSnapshotRecord[]): AccountSnapshotRecord[][] {
+  const map = new Map<string, AccountSnapshotRecord[]>();
+  for (const s of snapshots) {
+    const list = map.get(s.accountId) ?? [];
+    list.push(s);
+    map.set(s.accountId, list);
+  }
+  return Array.from(map.values()).map((list) =>
+    [...list].sort((a, b) => a.reportTimestampRaw.localeCompare(b.reportTimestampRaw)),
   );
-  return dt.getTime();
 }
 
-function formatExactHoldingDuration(openRaw: string, closeRaw: string | null, fallbackMinutes: number | null): string {
-  const start = parseRawTimestampMs(openRaw);
-  const end = parseRawTimestampMs(closeRaw);
-  if (start !== null && end !== null && end >= start) {
-    const totalSec = Math.floor((end - start) / 1000);
-    const hours = Math.floor(totalSec / 3600);
-    const mins = Math.floor((totalSec % 3600) / 60);
-    const secs = totalSec % 60;
-    if (hours > 0) {
-      return mins > 0 ? `${hours} giờ ${mins} phút` : `${hours} giờ`;
+// 7 ngày gần nhất tính đến hôm nay; cửa sổ tự trượt dần theo thời gian.
+// Ngày không có sao kê giữ nguyên số dư của sao kê gần nhất trước đó.
+function buildBalanceWindow(snapshots: AccountSnapshotRecord[]): BalancePoint[] {
+  const groups = groupByAccount(snapshots);
+  const today = todayIso();
+  return Array.from({ length: BALANCE_WINDOW_DAYS }, (_, i) => {
+    const date = addDaysIso(today, i - (BALANCE_WINDOW_DAYS - 1));
+    let total = 0;
+    let known = false;
+    let real = false;
+    for (const list of groups) {
+      let last: AccountSnapshotRecord | null = null;
+      for (const s of list) {
+        if (s.reportDate <= date) last = s;
+        else break;
+      }
+      if (last) {
+        const bal = Number(last.balance);
+        if (Number.isFinite(bal)) {
+          total += bal;
+          known = true;
+          if (last.reportDate === date) real = true;
+        }
+      }
     }
-    if (mins > 0) {
-      return secs > 0 ? `${mins} phút ${secs} giây` : `${mins} phút`;
-    }
-    return `${secs} giây`;
-  }
-  if (fallbackMinutes !== null) {
-    return `${fallbackMinutes} phút`;
-  }
-  return '—';
+    return {
+      date,
+      label: formatIsoShort(date),
+      balance: known ? Math.round(total * 100) / 100 : null,
+      real,
+    };
+  });
 }
 
-function formatDateTimeDisplay(raw: string): string {
-  const m = raw.trim().match(/^(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)$/);
-  if (!m) return raw;
-  return `${m[3]}/${m[2]}/${m[1]} · ${m[4]}`;
+function getCurrentBalance(snapshots: AccountSnapshotRecord[]): { value: number; date: string } | null {
+  const groups = groupByAccount(snapshots);
+  let total = 0;
+  let latestDate = '';
+  let found = false;
+  for (const list of groups) {
+    const last = list[list.length - 1];
+    const bal = Number(last?.balance);
+    if (last && Number.isFinite(bal)) {
+      total += bal;
+      found = true;
+      if (last.reportDate > latestDate) latestDate = last.reportDate;
+    }
+  }
+  return found ? { value: Math.round(total * 100) / 100, date: latestDate } : null;
 }
 
 export const OverviewView: React.FC<OverviewViewProps> = ({
   dataset,
   trades,
-  snapshots,
+  balanceSnapshots,
   metrics,
   onNavigate,
+  onOpenDiaryDay,
 }) => {
-  const latestSnapshot =
-    snapshots[snapshots.length - 1] ?? dataset.snapshots[dataset.snapshots.length - 1] ?? null;
+  const isDark = useIsDark();
+  const colors = chartColors(isDark);
 
-  const recentTrades = useMemo(() => {
-    return [...trades]
-      .sort((a, b) => (b.closeTimeRaw ?? b.openTimeRaw).localeCompare(a.closeTimeRaw ?? a.openTimeRaw))
-      .slice(0, 6);
-  }, [trades]);
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getFullYear());
+  const [calMonth, setCalMonth] = useState(now.getMonth());
 
   const uniqueHabitCount = useMemo(() => {
     const tags = new Set(
@@ -119,69 +149,62 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     return Math.max(...metrics.bySymbol.map((s) => Math.abs(Number(s.netPL))), 1);
   }, [metrics.bySymbol]);
 
+  const balanceWindow = useMemo(() => buildBalanceWindow(balanceSnapshots), [balanceSnapshots]);
+  const hasBalanceData = balanceWindow.some((p) => p.balance !== null);
+  const currentBalance = useMemo(() => getCurrentBalance(balanceSnapshots), [balanceSnapshots]);
+
+  // Tổng lãi / lỗ theo từng ngày (ngày đóng lệnh) để vẽ lịch
+  const dayStats = useMemo(() => {
+    const map = new Map<string, { net: number; count: number }>();
+    for (const t of trades) {
+      const iso = isoFromRaw(t.closeTimeRaw ?? t.openTimeRaw);
+      const entry = map.get(iso) ?? { net: 0, count: 0 };
+      entry.net += Number(t.netPL) || 0;
+      entry.count += 1;
+      map.set(iso, entry);
+    }
+    for (const entry of map.values()) {
+      entry.net = Math.round(entry.net * 100) / 100;
+    }
+    return map;
+  }, [trades]);
+
+  const monthSummary = useMemo(() => {
+    const prefix = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-`;
+    let net = 0;
+    let days = 0;
+    for (const [iso, entry] of dayStats) {
+      if (iso.startsWith(prefix)) {
+        net += entry.net;
+        days += 1;
+      }
+    }
+    return { net: Math.round(net * 100) / 100, days };
+  }, [dayStats, calYear, calMonth]);
+
   if (dataset.imports.length === 0) {
     return (
-      <div className="space-y-6">
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-6 sm:p-8">
-          <p className="text-xs font-medium text-[#C96442] tracking-wide">
-            Chưa có dữ liệu báo cáo cuối ngày
-          </p>
-          <h2 className="mt-2 text-xl sm:text-2xl font-semibold text-[#1C1B18] dark:text-[#F2EFE9] text-balance">
-            Kết nối Gmail hoặc nhập email Daily Confirmation đầu tiên
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
-            Đây là sổ nhật ký ghi nhận lại các giao dịch đã hoàn tất và quan sát hành động giá cá nhân. Mỗi ngày vào 23:59 (giờ sàn), khi phát sinh giao dịch, sàn sẽ gửi email{' '}
-            <span className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">Daily Confirmation</span>{' '}
-            vào Gmail của bạn — ứng dụng sẽ đọc lại báo cáo đó để tổng hợp số liệu và rút kinh nghiệm.
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => onNavigate('sync_settings')}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#C96442] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B55535] transition-colors min-h-[44px]"
-            >
-              <Mail className="w-4 h-4" />
-              <span>Đồng bộ Gmail / Nhập báo cáo</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate('research')}
-              className="inline-flex items-center gap-2 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] transition-colors min-h-[44px]"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Mở sổ Nghiên cứu hành động giá</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-            <p className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">01. Nhật ký sau phiên</p>
-            <p className="mt-1.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-              Ghi nhận từ báo cáo đã chốt cuối ngày
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
-              Ngày không có email xác nhận được hiểu là không phát sinh giao dịch hoặc chưa nhập báo cáo, không tạo số liệu giả.
-            </p>
-          </div>
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-            <p className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">02. Rút kinh nghiệm cá nhân</p>
-            <p className="mt-1.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-              Lưu lại setup, tâm lý và bài học
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
-              Các lệnh đã hoàn tất được tổng hợp vào Nhật ký giao dịch để bạn tự đánh giá kỷ luật và sai sót.
-            </p>
-          </div>
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-            <p className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">03. Quan sát đã ghi nhận</p>
-            <p className="mt-1.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-              <span className="font-mono-num">{dataset.observations.length}</span> bản ghi hành động giá
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
-              Bạn có thể ghi nhận ngay các hành vi nến theo phiên Á/Âu/Mỹ để tích lũy dữ liệu thói quen giá.
-            </p>
-          </div>
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-6 sm:p-8">
+        <h2 className="text-xl sm:text-2xl font-semibold text-[#1C1B18] dark:text-[#F2EFE9] text-balance">
+          Chưa có dữ liệu báo cáo cuối ngày
+        </h2>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onNavigate('sync_settings')}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#C96442] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B55535] transition-colors min-h-[44px]"
+          >
+            <Mail className="w-4 h-4" />
+            <span>Nhập báo cáo</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('research')}
+            className="inline-flex items-center gap-2 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] transition-colors min-h-[44px]"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Mở sổ Nghiên cứu hành động giá</span>
+          </button>
         </div>
       </div>
     );
@@ -189,13 +212,52 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
   const netPlNum = Number(metrics.netPL);
   const closedPadded = String(metrics.closedTrades).padStart(2, '0');
-  const isSmallSample = metrics.closedTrades > 0 && metrics.closedTrades < 10;
+  const axisTick = { fontSize: 11, fill: colors.axis };
+
+  const renderBalanceDot = (props: {
+    cx?: number;
+    cy?: number;
+    index?: number;
+    payload?: BalancePoint;
+  }) => {
+    const { cx, cy, index, payload } = props;
+    if (cx === undefined || cy === undefined || !payload?.real) {
+      return <g key={`dot-${index}`} />;
+    }
+    return (
+      <circle
+        key={`dot-${index}`}
+        cx={cx}
+        cy={cy}
+        r={4}
+        fill="#C96442"
+        stroke={isDark ? '#22211E' : '#FFFFFF'}
+        strokeWidth={2}
+      />
+    );
+  };
 
   return (
     <div className="space-y-5">
-      {/* Row 1: 4 Primary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* KPI 1: Lãi / lỗ ròng đã chốt */}
+      {/* Row 1: KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* KPI 1: Số dư hiện tại */}
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+              Số dư hiện tại
+            </span>
+            <Wallet className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+          </div>
+          <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
+            {currentBalance ? formatUsd(currentBalance.value, false) : '—'}
+          </p>
+          <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            {currentBalance ? `Sao kê ${formatIsoDisplay(currentBalance.date)}` : 'Chưa có sao kê'}
+          </p>
+        </div>
+
+        {/* KPI 2: Lãi / lỗ ròng đã chốt */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
@@ -205,11 +267,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
           <p
             className={`mt-2.5 text-2xl font-semibold font-mono-num tracking-tight ${
-              netPlNum > 0
-                ? 'text-[#15803D] dark:text-[#4ADE80]'
-                : netPlNum < 0
-                  ? 'text-[#B91C1C] dark:text-[#F87171]'
-                  : 'text-[#1C1B18] dark:text-[#F2EFE9]'
+              pnlTextClass(netPlNum) || 'text-[#1C1B18] dark:text-[#F2EFE9]'
             }`}
           >
             {formatUsd(metrics.netPL)}
@@ -219,7 +277,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </p>
         </div>
 
-        {/* KPI 2: Số giao dịch đã đóng */}
+        {/* KPI 3: Số giao dịch đã đóng */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
@@ -236,7 +294,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </p>
         </div>
 
-        {/* KPI 3: Tỷ lệ thắng */}
+        {/* KPI 4: Tỷ lệ thắng */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
@@ -247,16 +305,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : '—'}
           </p>
-          <p className="mt-1.5 text-xs text-[#6B6963] dark:text-[#A6A39B]">
-            {metrics.closedTrades === 0
-              ? 'Chưa có giao dịch hoàn tất'
-              : isSmallSample
-                ? 'Mẫu còn nhỏ · chỉ mang tính mô tả'
-                : 'Tính trên các giao dịch đã đóng'}
+          <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            {metrics.winningTrades}/{metrics.closedTrades} lệnh thắng
           </p>
         </div>
 
-        {/* KPI 4: Hệ số lợi nhuận */}
+        {/* KPI 5: Hệ số lợi nhuận */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
@@ -271,40 +325,30 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 ? metrics.profitFactor.toFixed(2)
                 : '—'}
           </p>
-          <p className="mt-1.5 text-xs text-[#6B6963] dark:text-[#A6A39B]">
-            {metrics.profitFactorInfinite
-              ? 'Chưa xác định khi tổng lỗ bằng 0'
-              : metrics.expectancy !== null
-                ? `Kỳ vọng ${formatUsd(metrics.expectancy)} / lệnh`
-                : 'Chưa đủ dữ liệu tính toán'}
-          </p>
+          {!metrics.profitFactorInfinite && metrics.expectancy !== null && (
+            <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+              Kỳ vọng {formatUsd(metrics.expectancy)} / lệnh
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Row 2: Account Balance Evolution (Left 2/3) + Product Performance & Research Summary (Right 1/3) */}
+      {/* Row 2: Diễn biến số dư (7 ngày) + Hiệu suất theo sản phẩm & Nghiên cứu */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
-        {/* Left: Diễn biến số dư tài khoản */}
-        <div className="lg:col-span-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col justify-between">
-          <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                Diễn biến số dư tài khoản
-              </h3>
-              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mt-0.5">
-                Các mốc số dư từ sao kê, không phải đường Equity trong ngày
-              </p>
-            </div>
-            {latestSnapshot && (
-              <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-                {latestSnapshot.reportTimestampRaw}
-              </span>
-            )}
+        <div className="lg:col-span-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+              Diễn biến số dư tài khoản
+            </h3>
+            <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+              {BALANCE_WINDOW_DAYS} ngày gần nhất
+            </span>
           </div>
 
           <div className="h-64 w-full">
-            {metrics.equityCurve.length > 0 ? (
+            {hasBalanceData ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={metrics.equityCurve} margin={{ top: 18, right: 24, left: 8, bottom: 4 }}>
+                <AreaChart data={balanceWindow} margin={{ top: 18, right: 24, left: 8, bottom: 4 }}>
                   <defs>
                     <linearGradient id="balanceGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#C96442" stopOpacity={0.22} />
@@ -313,14 +357,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,115,105,0.16)" vertical={false} />
                   <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11, fill: '#6B6963' }}
+                    dataKey="label"
+                    tick={axisTick}
                     axisLine={false}
                     tickLine={false}
                     padding={{ left: 20, right: 20 }}
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: '#6B6963' }}
+                    tick={axisTick}
                     axisLine={false}
                     tickLine={false}
                     domain={['auto', 'auto']}
@@ -329,16 +373,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#1C1B18',
-                      border: '1px solid #32302B',
+                      backgroundColor: colors.tooltipBg,
+                      border: `1px solid ${colors.tooltipBorder}`,
                       borderRadius: '8px',
                       fontSize: '12px',
                       color: '#F2EFE9',
                     }}
-                    formatter={(val: unknown, name: unknown) => [
-                      formatUsd(Number(val), false),
-                      name === 'balance' ? 'Số dư (Balance)' : 'Equity',
-                    ]}
+                    labelStyle={{ color: '#F2EFE9' }}
+                    formatter={(val: unknown) => [formatUsd(Number(val), false), 'Số dư']}
+                    labelFormatter={(_label, payload) => {
+                      const date = payload?.[0]?.payload?.date as string | undefined;
+                      return date ? formatIsoDisplay(date) : '';
+                    }}
                   />
                   <Area
                     type="monotone"
@@ -346,97 +392,67 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     stroke="#C96442"
                     strokeWidth={2.2}
                     fill="url(#balanceGradient)"
-                    dot={{ r: 4, fill: '#C96442', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    connectNulls
+                    dot={renderBalanceDot}
                     activeDot={{ r: 5 }}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-xs text-[#6B6963]">
-                Chưa có mốc số dư trong khoảng thời gian đang chọn.
+              <div className="h-full flex items-center justify-center text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                Chưa có số dư trong {BALANCE_WINDOW_DAYS} ngày gần nhất.
               </div>
             )}
-          </div>
-
-          <div className="mt-3 pt-3 border-t border-[#E7E5E0]/70 dark:border-[#32302B]/70 flex items-center justify-between text-xs text-[#6B6963] dark:text-[#A6A39B]">
-            <span className="flex items-center gap-2">
-              <span className="inline-block w-3 h-0.5 bg-[#C96442]" aria-hidden="true" />
-              <span>Mốc Balance / Equity</span>
-            </span>
-            <span className="font-mono-num">{snapshots.length} bản sao kê</span>
           </div>
         </div>
 
-        {/* Right: Stacked 2 Cards (Hiệu suất theo sản phẩm + Nghiên cứu hành vi giá) */}
         <div className="flex flex-col gap-4">
-          {/* Card A: Hiệu suất theo sản phẩm */}
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex-1 flex flex-col justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                Hiệu suất theo sản phẩm
-              </h3>
-              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mt-0.5">
-                Lãi / lỗ ròng đã thực hiện, nhóm theo mã giao dịch
-              </p>
+          {/* Hiệu suất theo sản phẩm */}
+          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex-1">
+            <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+              Hiệu suất theo sản phẩm
+            </h3>
 
-              <div className="mt-4 space-y-3.5">
-                {metrics.bySymbol.map((item) => {
-                  const val = Number(item.netPL);
-                  const widthPct = Math.max(8, Math.round((Math.abs(val) / maxAbsSymbolPL) * 100));
-                  return (
-                    <div key={item.symbol} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-                          {item.symbol}
-                        </span>
-                        <span
-                          className={`font-mono-num font-semibold ${
-                            val > 0
-                              ? 'text-[#15803D] dark:text-[#4ADE80]'
-                              : val < 0
-                                ? 'text-[#B91C1C] dark:text-[#F87171]'
-                                : ''
-                          }`}
-                        >
-                          {formatUsd(item.netPL)}
-                        </span>
-                      </div>
-                      <div className="h-1.5 w-full rounded-full bg-[#F3F1EC] dark:bg-[#181715] overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            val >= 0 ? 'bg-[#C96442]' : 'bg-[#B91C1C]'
-                          }`}
-                          style={{ width: `${widthPct}%` }}
-                        />
-                      </div>
-                      <p className="text-[11px] font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-                        {item.trades} giao dịch · Win {item.winRate}%
-                      </p>
+            <div className="mt-4 space-y-3.5">
+              {metrics.bySymbol.map((item) => {
+                const val = Number(item.netPL);
+                const widthPct = Math.max(8, Math.round((Math.abs(val) / maxAbsSymbolPL) * 100));
+                return (
+                  <div key={item.symbol} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
+                        {item.symbol}
+                      </span>
+                      <span className={`font-mono-num font-semibold ${pnlTextClass(val)}`}>
+                        {formatUsd(item.netPL)}
+                      </span>
                     </div>
-                  );
-                })}
-                {metrics.bySymbol.length === 0 && (
-                  <p className="text-xs text-[#6B6963] py-2">Chưa có giao dịch đã đóng.</p>
-                )}
-              </div>
+                    <div className="h-2 w-full rounded-full bg-[#F3F1EC] dark:bg-[#181715] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${pnlBarClass(val)}`}
+                        style={{ width: `${widthPct}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                      {item.trades} giao dịch · Win {item.winRate}%
+                    </p>
+                  </div>
+                );
+              })}
+              {metrics.bySymbol.length === 0 && (
+                <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] py-2">
+                  Chưa có giao dịch đã đóng.
+                </p>
+              )}
             </div>
-
-            {isSmallSample && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/25 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                Mẫu dữ liệu còn ít: chưa nên kết luận về lợi thế giao dịch dài hạn.
-              </div>
-            )}
           </div>
 
-          {/* Card B: Nghiên cứu hành vi giá */}
+          {/* Nghiên cứu hành vi giá */}
           <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col justify-between gap-4">
             <div>
               <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
                 Nghiên cứu hành vi giá
               </h3>
-              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mt-0.5 font-mono-num">
-                {dataset.observations.length} quan sát đã ghi nhận
-              </p>
 
               <dl className="mt-4 space-y-2.5 text-xs">
                 <div className="flex items-center justify-between py-1 border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70">
@@ -466,130 +482,57 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
       </div>
 
-      {/* Row 3: Full-Width Recent Trades Table */}
+      {/* Row 3: Lịch lãi / lỗ theo ngày */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-              Giao dịch gần đây
-            </h3>
-            <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mt-0.5">
-              Giao dịch được ghép từ các Deal vào và ra từ báo cáo cuối ngày
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigate('diary')}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3.5 py-2 text-xs font-medium text-[#1C1B18] dark:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] transition-colors whitespace-nowrap min-h-[38px]"
-          >
-            <span>Xem toàn bộ</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963] dark:text-[#A6A39B] text-[11px] tracking-wide">
-                <th className="py-2.5 pr-4 font-medium">MÃ GIAO DỊCH</th>
-                <th className="py-2.5 px-3 font-medium">CHIỀU</th>
-                <th className="py-2.5 px-3 font-medium">GIÁ VÀO → RA</th>
-                <th className="py-2.5 px-3 font-medium text-right">KHỐI LƯỢNG</th>
-                <th className="py-2.5 px-3 font-medium">THỜI GIAN GIỮ</th>
-                <th className="py-2.5 px-3 font-medium text-right">LÃI / LỖ RÒNG</th>
-                <th className="py-2.5 pl-3 font-medium text-right">ĐÁNH GIÁ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70">
-              {recentTrades.map((t) => {
-                const netNum = Number(t.netPL);
-                const hasJournal = Boolean(
-                  t.journal &&
-                    (t.journal.strategy ||
-                      t.journal.thesis ||
-                      t.journal.lessonLearned ||
-                      t.journal.exitReason),
-                );
-                const tickerShort = t.symbol.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase();
-                return (
-                  <tr
-                    key={t.id}
-                    onClick={() => onNavigate('diary')}
-                    className="hover:bg-[#FAF9F5] dark:hover:bg-[#181715]/60 cursor-pointer transition-colors"
-                  >
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-3">
-                        <span className="h-8 w-8 rounded-lg bg-[#F3F1EC] dark:bg-[#181715] border border-[#E7E5E0] dark:border-[#32302B] flex items-center justify-center font-mono-num text-[11px] font-semibold text-[#6B6963] dark:text-[#A6A39B] shrink-0">
-                          {tickerShort}
-                        </span>
-                        <div>
-                          <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">{t.symbol}</p>
-                          <p className="text-[11px] font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-                            {formatDateTimeDisplay(t.openTimeRaw)}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-3">
-                      <span
-                        className={`font-semibold ${
-                          t.side === 'BUY'
-                            ? 'text-[#15803D] dark:text-[#4ADE80]'
-                            : 'text-[#B91C1C] dark:text-[#F87171]'
-                        }`}
-                      >
-                        {t.side === 'BUY' ? 'MUA' : 'BÁN'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-mono-num">
-                      <div className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-                        {formatPrice(t.entryPrice)}
-                      </div>
-                      <div className="text-[11px] text-[#6B6963] dark:text-[#A6A39B]">
-                        {formatPrice(t.exitPrice)}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono-num font-medium">
-                      {Number(t.volume).toFixed(2)}
-                    </td>
-                    <td className="py-3 px-3 font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">
-                      {formatExactHoldingDuration(t.openTimeRaw, t.closeTimeRaw, t.holdingMinutes)}
-                    </td>
-                    <td
-                      className={`py-3 px-3 text-right font-mono-num font-semibold ${
-                        netNum > 0
-                          ? 'text-[#15803D] dark:text-[#4ADE80]'
-                          : netNum < 0
-                            ? 'text-[#B91C1C] dark:text-[#F87171]'
-                            : ''
-                      }`}
-                    >
-                      {formatUsd(t.netPL)}
-                    </td>
-                    <td className="py-3 pl-3 text-right">
-                      <span
-                        className={`text-[11px] font-medium ${
-                          hasJournal
-                            ? 'text-[#15803D] dark:text-[#4ADE80]'
-                            : 'text-amber-700 dark:text-amber-400'
-                        }`}
-                      >
-                        {hasJournal ? 'ĐÃ ĐÁNH GIÁ' : 'CHỜ ĐÁNH GIÁ'}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {recentTrades.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-[#6B6963]">
-                    Chưa có giao dịch đã đóng nào trong bộ lọc hiện tại.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9] mb-4">
+          Lịch giao dịch
+        </h3>
+        <MonthCalendar
+          year={calYear}
+          month={calMonth}
+          onMonthChange={(y, m) => {
+            setCalYear(y);
+            setCalMonth(m);
+          }}
+          summary={
+            <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-[#6B6963] dark:text-[#A6A39B]">
+                {monthSummary.days} ngày giao dịch
+              </span>
+              <span className={`font-semibold ${pnlTextClass(monthSummary.net)}`}>
+                {formatUsd(monthSummary.net)}
+              </span>
+            </span>
+          }
+          getTone={(iso): CalendarTone | null => {
+            const stat = dayStats.get(iso);
+            if (!stat) return null;
+            return stat.net > 0 ? 'win' : stat.net < 0 ? 'loss' : 'neutral';
+          }}
+          isClickable={(iso) => dayStats.has(iso)}
+          onDayClick={onOpenDiaryDay}
+          renderDay={(iso) => {
+            const stat = dayStats.get(iso);
+            if (!stat) return null;
+            return (
+              <>
+                <span
+                  className={`mt-auto font-mono-num font-semibold text-[10px] sm:text-sm leading-tight whitespace-nowrap ${pnlTextClass(
+                    stat.net,
+                  )}`}
+                >
+                  <span className="sm:hidden">
+                    {formatCompactMoney(stat.net, Math.abs(stat.net) >= 100)}
+                  </span>
+                  <span className="hidden sm:inline">{formatCompactMoney(stat.net)}</span>
+                </span>
+                <span className="hidden sm:block text-[10px] text-[#6B6963] dark:text-[#A6A39B]">
+                  {stat.count} lệnh
+                </span>
+              </>
+            );
+          }}
+        />
       </div>
     </div>
   );

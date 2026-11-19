@@ -9,13 +9,6 @@ import {
   RefreshCw,
   Upload,
 } from 'lucide-react';
-import {
-  connectGmailAccount,
-  disconnectGmailAccount,
-  getCachedGmailToken,
-  initGmailAuthListener,
-} from '../lib/gmail/firebaseAuth.ts';
-import { PWAInstallButton } from './PWAInstallButton.tsx';
 import type { ParsedStatement, WorkspaceDataset } from '../shared/types.ts';
 
 interface SyncAndSettingsViewProps {
@@ -24,9 +17,9 @@ interface SyncAndSettingsViewProps {
 }
 
 const BROKER_TZ_OPTIONS = [
-  { value: 'Unknown', label: 'Unknown (Chưa xác định — tắt phân tích phiên)' },
-  { value: 'UTC+2', label: 'UTC+2 (MetaTrader giờ mùa Đông)' },
-  { value: 'UTC+3', label: 'UTC+3 (MetaTrader giờ mùa Hè)' },
+  { value: 'Unknown', label: 'Unknown (tắt phân tích phiên)' },
+  { value: 'UTC+2', label: 'UTC+2 (MetaTrader mùa Đông)' },
+  { value: 'UTC+3', label: 'UTC+3 (MetaTrader mùa Hè)' },
   { value: 'UTC+0', label: 'UTC+0 (GMT)' },
   { value: 'UTC+7', label: 'UTC+7 (Giờ Việt Nam)' },
 ];
@@ -73,10 +66,13 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 }) => {
   const [methodTab, setMethodTab] = useState<'gmail' | 'paste' | 'eml'>('gmail');
 
-  // Gmail state
-  const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
-  const [hasToken, setHasToken] = useState(false);
-  const [loginHint, setLoginHint] = useState('huynhminhthang301003@gmail.com');
+  // Gmail state (đồng bộ chạy hoàn toàn trên máy chủ bằng Refresh Token)
+  const [gmailStatus, setGmailStatus] = useState<{
+    loaded: boolean;
+    configured: boolean;
+    email: string | null;
+    error: string | null;
+  }>({ loaded: false, configured: false, email: null, error: null });
   const [lookbackDays, setLookbackDays] = useState<number>(14);
   const [gmailBusy, setGmailBusy] = useState(false);
   const [gmailMessage, setGmailMessage] = useState<string | null>(null);
@@ -108,70 +104,43 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
   >({});
 
   useEffect(() => {
-    const unsub = initGmailAuthListener(
-      (user, tokenAvailable) => {
-        setConnectedEmail(user.email);
-        setHasToken(tokenAvailable);
-      },
-      () => {
-        setConnectedEmail(null);
-        setHasToken(false);
-      },
-    );
-    return () => unsub();
+    let active = true;
+    fetch('/api/gmail/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        setGmailStatus({
+          loaded: true,
+          configured: Boolean(data.configured),
+          email: data.email ?? null,
+          error: data.error ?? null,
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setGmailStatus({ loaded: true, configured: false, email: null, error: 'Không kiểm tra được kết nối Gmail.' });
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleConnectGmail = async () => {
-    setGmailError(null);
-    setGmailMessage(null);
-    setGmailBusy(true);
-    try {
-      const { user } = await connectGmailAccount(loginHint);
-      setConnectedEmail(user.email);
-      setHasToken(true);
-      setGmailMessage(`Đã kết nối thành công với hộp thư ${user.email}. Bạn có thể bấm Đồng bộ ngay.`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không thể kết nối Gmail.';
-      setGmailError(
-        msg.includes('access_denied') || msg.includes('403')
-          ? `Google từ chối truy cập cho ${loginHint}. Lưu ý: Nếu OAuth đang ở chế độ Testing, hãy thêm ${loginHint} vào mục Test Users trong Google Cloud Console.`
-          : msg,
-      );
-    } finally {
-      setGmailBusy(false);
-    }
-  };
-
-  const handleDisconnectGmail = async () => {
-    await disconnectGmailAccount();
-    setConnectedEmail(null);
-    setHasToken(false);
-    setGmailPreviews([]);
-    setGmailMessage('Đã ngắt kết nối Gmail.');
-  };
+  const lastGmailSync = dataset.syncLogs.find((l) => l.source === 'gmail');
 
   const handleGmailSync = async (dryRun: boolean) => {
-    const token = getCachedGmailToken();
-    if (!token) {
-      setGmailError('Token phiên đăng nhập chưa sẵn sàng. Vui lòng bấm Kết nối lại Gmail.');
-      return;
-    }
     setGmailBusy(true);
     setGmailError(null);
     setGmailMessage(null);
     try {
       const res = await fetch('/api/gmail/sync', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days: lookbackDays, dryRun }),
       });
       const data = await res.json();
       if (!res.ok) {
         setGmailError(data.error ?? 'Đồng bộ Gmail thất bại.');
-        if (data.needsReauth) setHasToken(false);
         return;
       }
       setGmailMessage(data.message);
@@ -276,12 +245,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       {/* 1. Email Daily Confirmation Import */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E7E5E0] dark:border-[#32302B]">
-          <div>
-            <h2 className="text-base font-semibold">Nhập báo cáo Daily Confirmation từ Email</h2>
-            <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
-              Chỉ lấy dữ liệu từ email tổng kết cuối ngày (23:59) gửi về Gmail để ghi nhận lịch sử giao dịch đã hoàn tất.
-            </p>
-          </div>
+          <h2 className="text-base font-semibold">Nhập báo cáo Daily Confirmation từ Email</h2>
           <div className="inline-flex rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1 self-start">
             <button
               type="button"
@@ -293,7 +257,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               }`}
             >
               <Mail className="w-3.5 h-3.5" />
-              <span>Gmail API</span>
+              <span>Gmail tự động</span>
             </button>
             <button
               type="button"
@@ -324,94 +288,79 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 
         {methodTab === 'gmail' && (
           <div className="mt-5 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-medium mb-1">
-                  Địa chỉ Gmail nhận email Daily Confirmation
-                </label>
-                <input
-                  type="email"
-                  value={loginHint}
-                  onChange={(e) => setLoginHint(e.target.value)}
-                  placeholder="huynhminhthang301003@gmail.com"
-                  className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                />
+            {!gmailStatus.loaded ? (
+              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Đang kiểm tra kết nối...</p>
+            ) : !gmailStatus.configured ? (
+              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-3 text-xs text-loss">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Chưa cấu hình Gmail trên máy chủ (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN).
+                </span>
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Quét bù lịch sử</label>
-                <select
-                  value={lookbackDays}
-                  onChange={(e) => setLookbackDays(Number(e.target.value))}
-                  className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                >
-                  <option value={7}>7 ngày gần nhất</option>
-                  <option value={14}>14 ngày gần nhất</option>
-                  <option value={30}>30 ngày gần nhất</option>
-                  <option value={90}>90 ngày gần nhất</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {!connectedEmail || !hasToken ? (
-                <button
-                  type="button"
-                  disabled={gmailBusy}
-                  onClick={handleConnectGmail}
-                  className="inline-flex items-center gap-2.5 rounded-lg border border-[#DADCE0] bg-white px-4 py-2.5 text-sm font-medium text-[#3C4043] hover:bg-[#F8F9FA] shadow-xs min-h-[44px]"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 48 48">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                  </svg>
-                  <span>
-                    {connectedEmail ? `Kết nối lại Gmail (${connectedEmail})` : 'Kết nối Gmail (Chỉ đọc)'}
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2 text-sm font-medium">
+                    {gmailStatus.error ? (
+                      <AlertCircle className="w-4 h-4 text-loss shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-win shrink-0" />
+                    )}
+                    <span className={gmailStatus.error ? 'text-loss' : 'text-win'}>
+                      {gmailStatus.error
+                        ? gmailStatus.error
+                        : `Tự động đồng bộ · ${gmailStatus.email ?? 'Gmail đã kết nối'}`}
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                    Lần gần nhất:{' '}
+                    {lastGmailSync ? new Date(lastGmailSync.createdAt).toLocaleString('vi-VN') : '—'}
                   </span>
-                </button>
-              ) : (
-                <>
+                </div>
+
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Quét bù lịch sử</label>
+                    <select
+                      value={lookbackDays}
+                      onChange={(e) => setLookbackDays(Number(e.target.value))}
+                      className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm min-h-[44px]"
+                    >
+                      <option value={7}>7 ngày gần nhất</option>
+                      <option value={14}>14 ngày gần nhất</option>
+                      <option value={30}>30 ngày gần nhất</option>
+                      <option value={90}>90 ngày gần nhất</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
-                    disabled={gmailBusy}
+                    disabled={gmailBusy || Boolean(gmailStatus.error)}
                     onClick={() => handleGmailSync(false)}
                     className="inline-flex items-center gap-2 rounded-lg bg-[#C96442] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B55535] disabled:opacity-50 min-h-[44px]"
                   >
                     <RefreshCw className={`w-4 h-4 ${gmailBusy ? 'animate-spin' : ''}`} />
-                    <span>Đồng bộ ngay ({connectedEmail})</span>
+                    <span>Đồng bộ ngay</span>
                   </button>
                   <button
                     type="button"
-                    disabled={gmailBusy}
+                    disabled={gmailBusy || Boolean(gmailStatus.error)}
                     onClick={() => handleGmailSync(true)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2.5 text-sm font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[44px]"
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2.5 text-sm font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] disabled:opacity-50 min-h-[44px]"
                   >
                     <span>Quét thử (Dry-run)</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleDisconnectGmail}
-                    className="text-xs text-[#6B6963] hover:text-[#B91C1C] underline underline-offset-4 px-2 py-2"
-                  >
-                    Ngắt kết nối
-                  </button>
-                </>
-              )}
-            </div>
-
-            <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
-              Bộ lọc tìm kiếm: <span className="font-mono-num">from:support@vantagemarkets.com subject:"Daily Confirmation"</span>.
-            </p>
+                </div>
+              </>
+            )}
 
             {gmailMessage && (
-              <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 p-3 text-xs text-[#15803D] dark:text-[#4ADE80]">
+              <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 p-3 text-xs text-win">
                 <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{gmailMessage}</span>
               </div>
             )}
             {gmailError && (
-              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-3 text-xs text-[#B91C1C] dark:text-[#F87171]">
+              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-3 text-xs text-loss">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{gmailError}</span>
               </div>
@@ -444,9 +393,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
         {methodTab === 'paste' && (
           <div className="mt-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-medium">
-                Dán toàn bộ nội dung văn bản hoặc HTML từ email Daily Confirmation
-              </label>
+              <label className="text-xs font-medium">Nội dung email Daily Confirmation</label>
               <button
                 type="button"
                 onClick={() => {
@@ -490,10 +437,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           <div className="mt-5 space-y-4">
             <label className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] p-8 cursor-pointer hover:border-[#C96442] transition-colors">
               <Upload className="w-6 h-6 text-[#C96442] mb-2" />
-              <span className="text-sm font-medium">Chọn file .eml hoặc .html từ máy tính / iPhone</span>
-              <span className="mt-1 text-xs text-[#6B6963] dark:text-[#A6A39B]">
-                Bộ giải mã MIME tự động tách phần text/html và kiểm tra đối chiếu số dư
-              </span>
+              <span className="text-sm font-medium">Chọn file .eml hoặc .html</span>
               <input
                 type="file"
                 accept=".eml,.html,.htm,.txt"
@@ -520,8 +464,8 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           <div
             className={`mt-4 rounded-lg border p-3 text-xs ${
               feedback.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 text-[#15803D] dark:text-[#4ADE80]'
-                : 'border-red-500/30 bg-red-50/70 dark:bg-red-950/30 text-[#B91C1C] dark:text-[#F87171]'
+                ? 'border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 text-win'
+                : 'border-red-500/30 bg-red-50/70 dark:bg-red-950/30 text-loss'
             }`}
           >
             {feedback.text}
@@ -571,22 +515,17 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       {/* 2. Timezone & Storage Status + Export / PWA */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E7E5E0] dark:border-[#32302B]">
-          <div>
-            <h3 className="text-sm font-semibold">Cài đặt tài khoản & Lưu trữ</h3>
-            <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
-              Chọn múi giờ máy chủ sàn để mở khóa thống kê theo Phiên Á/Âu/Mỹ. Kết nối Neon Database được cấu hình qua biến <span className="font-mono-num">DATABASE_URL</span> trong môi trường.
-            </p>
-          </div>
+          <h3 className="text-sm font-semibold">Cài đặt tài khoản & Lưu trữ</h3>
           <div className="inline-flex items-center gap-1.5 text-xs font-medium shrink-0">
             <Database className="w-3.5 h-3.5 text-[#C96442]" />
-            <span className={dataset.dbConnected ? 'text-[#15803D] dark:text-[#4ADE80]' : 'text-[#6B6963] dark:text-[#A6A39B]'}>
-              {dataset.dbConnected ? 'Neon PostgreSQL: Đã kết nối' : 'Bộ nhớ tạm (Chưa đặt DATABASE_URL)'}
+            <span className={dataset.dbConnected ? 'text-win' : 'text-[#6B6963] dark:text-[#A6A39B]'}>
+              {dataset.dbConnected ? 'Neon PostgreSQL: Đã kết nối' : 'Bộ nhớ tạm (chưa có DATABASE_URL)'}
             </span>
           </div>
         </div>
 
         {savedBanner && (
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 px-3 py-2 text-xs text-[#15803D] dark:text-[#4ADE80]">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 px-3 py-2 text-xs text-win">
             {savedBanner}
           </div>
         )}
@@ -666,9 +605,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             })}
           </div>
         ) : (
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
-            Tài khoản sẽ tự động được tạo khi bạn nhập báo cáo Daily Confirmation đầu tiên.
-          </p>
+          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Chưa có tài khoản nào.</p>
         )}
 
         <div className="pt-3 border-t border-[#E7E5E0] dark:border-[#32302B] flex flex-wrap items-center justify-between gap-3">
@@ -732,8 +669,6 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               <span>Sao lưu JSON</span>
             </a>
           </div>
-
-          <PWAInstallButton />
         </div>
       </div>
 

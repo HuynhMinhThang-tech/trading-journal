@@ -10,6 +10,8 @@ import {
   YAxis,
 } from 'recharts';
 import { AlertTriangle } from 'lucide-react';
+import { useIsDark } from '../hooks/useIsDark.ts';
+import { chartColors } from '../lib/pnl.ts';
 import type { MetricsSummary } from '../shared/types.ts';
 
 interface AnalyticsViewProps {
@@ -30,6 +32,16 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   onNavigateSettings,
 }) => {
   const [timeScale, setTimeScale] = useState<'day' | 'week' | 'month'>('day');
+  const isDark = useIsDark();
+  const colors = chartColors(isDark);
+  const axisTick = { fontSize: 11, fill: colors.axis };
+  const tooltipStyle = {
+    backgroundColor: colors.tooltipBg,
+    border: `1px solid ${colors.tooltipBorder}`,
+    borderRadius: '8px',
+    fontSize: '12px',
+    color: '#F2EFE9',
+  };
 
   const symbolChartData = metrics.bySymbol.map((s) => ({
     symbol: s.symbol,
@@ -68,9 +80,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <p
             className={`mt-1.5 text-xl font-semibold font-mono-num ${
               metrics.expectancy !== null && Number(metrics.expectancy) > 0
-                ? 'text-[#15803D] dark:text-[#4ADE80]'
+                ? 'text-win'
                 : metrics.expectancy !== null && Number(metrics.expectancy) < 0
-                  ? 'text-[#B91C1C] dark:text-[#F87171]'
+                  ? 'text-loss'
                   : ''
             }`}
           >
@@ -84,16 +96,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
           <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Lãi TB / Lỗ TB mỗi lệnh</p>
           <p className="mt-1.5 text-xl font-semibold font-mono-num">
-            <span className="text-[#15803D] dark:text-[#4ADE80]">
+            <span className="text-win">
               {metrics.averageWin ? `+$${metrics.averageWin}` : '—'}
             </span>
             <span className="mx-1.5 text-[#6B6963]">/</span>
-            <span className="text-[#B91C1C] dark:text-[#F87171]">
+            <span className="text-loss">
               {metrics.averageLoss ? `-$${metrics.averageLoss}` : '—'}
             </span>
-          </p>
-          <p className="mt-1 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-            Tỷ lệ Reward/Risk thực tế trung bình
           </p>
         </div>
 
@@ -137,9 +146,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               <span
                 className={`text-base font-mono-num font-semibold ${
                   Number(s.netPL) > 0
-                    ? 'text-[#15803D] dark:text-[#4ADE80]'
+                    ? 'text-win'
                     : Number(s.netPL) < 0
-                      ? 'text-[#B91C1C] dark:text-[#F87171]'
+                      ? 'text-loss'
                       : ''
                 }`}
               >
@@ -153,30 +162,21 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Charts: P/L by Symbol + Win/Loss Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-          <h3 className="text-sm font-semibold mb-1">Net P/L theo Mã giao dịch</h3>
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mb-4">
-            Chỉ tính các Trade đã ghép hoàn chỉnh (n = {metrics.closedTrades})
-          </p>
+          <h3 className="text-sm font-semibold mb-4">Net P/L theo Mã giao dịch</h3>
           <div className="h-56 w-full">
             {symbolChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={symbolChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,115,105,0.18)" vertical={false} />
-                  <XAxis dataKey="symbol" tick={{ fontSize: 12, fill: '#6B6963' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6B6963' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                  <XAxis dataKey="symbol" tick={{ fontSize: 12, fill: colors.axis }} axisLine={false} tickLine={false} />
+                  <YAxis tick={axisTick} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1C1B18',
-                      border: '1px solid #32302B',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: '#F2EFE9',
-                    }}
+                    contentStyle={tooltipStyle}
                     formatter={(v: unknown) => [`$${Number(v).toFixed(2)}`, 'Net P/L']}
                   />
                   <Bar dataKey="netPL" radius={[6, 6, 0, 0]}>
                     {symbolChartData.map((entry) => (
-                      <Cell key={entry.symbol} fill={entry.netPL >= 0 ? '#15803D' : '#B91C1C'} />
+                      <Cell key={entry.symbol} fill={entry.netPL >= 0 ? colors.win : colors.loss} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -191,30 +191,21 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
         {/* Win/Loss Distribution */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-          <h3 className="text-sm font-semibold mb-1">Phân bố mức Lãi / Lỗ (Win/Loss Distribution)</h3>
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mb-4">
-            Số lượng Trade theo từng dải lợi nhuận (n = {metrics.closedTrades})
-          </p>
+          <h3 className="text-sm font-semibold mb-4">Phân bố mức Lãi / Lỗ (Win/Loss Distribution)</h3>
           <div className="h-56 w-full">
             {metrics.closedTrades > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={metrics.winLossDistribution}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,115,105,0.18)" vertical={false} />
-                  <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#6B6963' }} axisLine={false} tickLine={false} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6B6963' }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="bucket" tick={axisTick} axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1C1B18',
-                      border: '1px solid #32302B',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: '#F2EFE9',
-                    }}
+                    contentStyle={tooltipStyle}
                     formatter={(v: unknown) => [`${v} lệnh`, 'Số lượng']}
                   />
                   <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                     {metrics.winLossDistribution.map((b) => (
-                      <Cell key={b.bucket} fill={b.isWin ? '#15803D' : '#B91C1C'} />
+                      <Cell key={b.bucket} fill={b.isWin ? colors.win : colors.loss} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -232,34 +223,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div>
-              <h3 className="text-sm font-semibold">Hiệu suất theo Ngày / Tuần / Tháng</h3>
-              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
-                Đối chiếu kết quả theo từng chu kỳ thời gian
-              </p>
-            </div>
-            <div className="inline-flex rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1">
-              {(
-                [
-                  { id: 'day', label: 'Ngày' },
-                  { id: 'week', label: 'Tuần' },
-                  { id: 'month', label: 'Tháng' },
-                ] as const
-              ).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTimeScale(t.id)}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                    timeScale === t.id
-                      ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                      : 'text-[#6B6963] dark:text-[#A6A39B]'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <h3 className="text-sm font-semibold">Hiệu suất theo Ngày / Tuần / Tháng</h3>
+            <select
+              value={timeScale}
+              onChange={(e) => setTimeScale(e.target.value as 'day' | 'week' | 'month')}
+              aria-label="Chu kỳ thời gian"
+              className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-1.5 text-xs font-medium min-h-[34px]"
+            >
+              <option value="day">Theo ngày</option>
+              <option value="week">Theo tuần</option>
+              <option value="month">Theo tháng</option>
+            </select>
           </div>
 
           <div className="overflow-x-auto">
@@ -281,8 +255,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     <td
                       className={`py-2 text-right font-mono-num font-semibold ${
                         Number(r.netPL) >= 0
-                          ? 'text-[#15803D] dark:text-[#4ADE80]'
-                          : 'text-[#B91C1C] dark:text-[#F87171]'
+                          ? 'text-win'
+                          : 'text-loss'
                       }`}
                     >
                       {formatMoney(r.netPL)}
@@ -326,8 +300,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     <td
                       className={`py-2 text-right font-mono-num font-semibold ${
                         Number(b.netPL) >= 0
-                          ? 'text-[#15803D] dark:text-[#4ADE80]'
-                          : 'text-[#B91C1C] dark:text-[#F87171]'
+                          ? 'text-win'
+                          : 'text-loss'
                       }`}
                     >
                       {formatMoney(b.netPL)}
@@ -384,8 +358,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   <span
                     className={`font-mono-num font-semibold ${
                       Number(s.netPL) >= 0
-                        ? 'text-[#15803D] dark:text-[#4ADE80]'
-                        : 'text-[#B91C1C] dark:text-[#F87171]'
+                        ? 'text-win'
+                        : 'text-loss'
                     }`}
                   >
                     {formatMoney(s.netPL)}
@@ -401,8 +375,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
         {/* By Strategy */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-          <h3 className="text-sm font-semibold mb-1">Theo Chiến lược / Setup</h3>
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mb-3">Kèm cỡ mẫu n</p>
+          <h3 className="text-sm font-semibold mb-3">Theo Chiến lược / Setup</h3>
           <div className="space-y-2 text-xs">
             {metrics.byStrategy.map((s) => (
               <div
@@ -418,8 +391,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <span
                   className={`font-mono-num font-semibold ${
                     Number(s.netPL) >= 0
-                      ? 'text-[#15803D] dark:text-[#4ADE80]'
-                      : 'text-[#B91C1C] dark:text-[#F87171]'
+                      ? 'text-win'
+                      : 'text-loss'
                   }`}
                 >
                   {formatMoney(s.netPL)}
@@ -434,10 +407,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
         {/* By Mistake Tags */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-          <h3 className="text-sm font-semibold mb-1">Chi phí theo Thẻ lỗi sai</h3>
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mb-3">
-            Tổng hợp từ Nhật ký giao dịch
-          </p>
+          <h3 className="text-sm font-semibold mb-3">Chi phí theo Thẻ lỗi sai</h3>
           <div className="space-y-2 text-xs">
             {metrics.byMistakeTag.map((m) => (
               <div
@@ -451,8 +421,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <span
                   className={`font-mono-num font-semibold ${
                     Number(m.netPL) >= 0
-                      ? 'text-[#15803D] dark:text-[#4ADE80]'
-                      : 'text-[#B91C1C] dark:text-[#F87171]'
+                      ? 'text-win'
+                      : 'text-loss'
                   }`}
                 >
                   {formatMoney(m.netPL)}
@@ -468,19 +438,15 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       {/* Explicit Data Limitations Dictionary */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-        <h3 className="text-sm font-semibold mb-3">
-          Chỉ số nâng cao & Giới hạn đầu vào từ Email Daily Confirmation
-        </h3>
+        <h3 className="text-sm font-semibold mb-3">Chỉ số nâng cao</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">
             <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">R-Multiple</p>
             <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">Chưa đủ dữ liệu</p>
-            <p className="mt-1">{metrics.rMultipleStatus}.</p>
           </div>
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">
             <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">MAE / MFE</p>
             <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">Chưa đủ dữ liệu</p>
-            <p className="mt-1">{metrics.maeMfeStatus}.</p>
           </div>
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">
             <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">Max Drawdown ngày</p>
@@ -490,7 +456,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 ? ` (${metrics.maxObservedDailyDrawdownPct}%)`
                 : ''}
             </p>
-            <p className="mt-1">Chỉ phản ánh mức sụt giảm giữa các snapshot cuối ngày, không phải intraday.</p>
           </div>
         </div>
       </div>

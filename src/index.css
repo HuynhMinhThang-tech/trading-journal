@@ -13,6 +13,16 @@
     --text-primary: #1C1B18;
     --text-secondary: #6B6963;
     --accent: #C96442;
+
+    /* Lãi / lỗ */
+    --pnl-win: #15803D;
+    --pnl-loss: #B91C1C;
+    --pnl-win-soft: rgba(21, 128, 61, 0.10);
+    --pnl-loss-soft: rgba(185, 28, 28, 0.10);
+    --pnl-win-line: rgba(21, 128, 61, 0.30);
+    --pnl-loss-line: rgba(185, 28, 28, 0.30);
+
+    color-scheme: light;
   }
 
   .dark {
@@ -23,6 +33,16 @@
     --text-primary: #F2EFE9;
     --text-secondary: #A6A39B;
     --accent: #D97757;
+
+    /* Giao diện tối: màu sáng, bão hòa cao để lãi / lỗ nổi rõ trên nền tối */
+    --pnl-win: #34E3A0;
+    --pnl-loss: #FF7A85;
+    --pnl-win-soft: rgba(52, 227, 160, 0.16);
+    --pnl-loss-soft: rgba(255, 122, 133, 0.16);
+    --pnl-win-line: rgba(52, 227, 160, 0.45);
+    --pnl-loss-line: rgba(255, 122, 133, 0.45);
+
+    color-scheme: dark;
   }
 
   html {
@@ -85,4 +105,31 @@
 
 .pt-safe {
   padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Màu lãi / lỗ dùng chung cho chữ, thanh và ô lịch (tự đổi theo giao diện Sáng / Tối) */
+.text-win {
+  color: var(--pnl-win);
+}
+
+.text-loss {
+  color: var(--pnl-loss);
+}
+
+.bg-win {
+  background-color: var(--pnl-win);
+}
+
+.bg-loss {
+  background-color: var(--pnl-loss);
+}
+
+.cal-win {
+  background-color: var(--pnl-win-soft);
+  border-color: var(--pnl-win-line);
+}
+
+.cal-loss {
+  background-color: var(--pnl-loss-soft);
+  border-color: var(--pnl-loss-line);
 }
