@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   BookOpen,
@@ -18,6 +18,7 @@ import { OverviewView } from './components/OverviewView.tsx';
 import { PWAInstallButton } from './components/PWAInstallButton.tsx';
 import { ResearchView } from './components/ResearchView.tsx';
 import { SyncAndSettingsView } from './components/SyncAndSettingsView.tsx';
+import { useSwipeTabs } from './hooks/useSwipeTabs.ts';
 import { calculateMetrics } from './lib/analytics/metricsEngine.ts';
 import type {
   JournalEntry,
@@ -203,8 +204,21 @@ export default function App() {
   const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   const showGlobalFilters = ['overview', 'diary', 'analytics'].includes(activeTab);
 
+  // Vuốt ngang để chuyển panel; đổi tab thì cuộn nội dung về đầu trang.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const swipeHandlers = useSwipeTabs((direction) => {
+    setActiveTab((current) => {
+      const index = NAV_ITEMS.findIndex((n) => n.id === current);
+      const target = NAV_ITEMS[index + (direction === 'next' ? 1 : -1)];
+      return target ? target.id : current;
+    });
+  });
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
+
   return (
-    <div className="min-h-screen bg-[#FAF9F5] dark:bg-[#181715] text-[#1C1B18] dark:text-[#F2EFE9] flex">
+    <div className="h-dvh overflow-hidden bg-[#FAF9F5] dark:bg-[#181715] text-[#1C1B18] dark:text-[#F2EFE9] flex">
       {/* Desktop Left Sidebar (Collapsible / Expandable) */}
       <aside
         className={`hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 border-r border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] transition-[width] duration-200 ${
@@ -294,12 +308,12 @@ export default function App() {
 
       {/* Main Content Wrapper */}
       <div
-        className={`flex-1 flex flex-col min-w-0 transition-[padding] duration-200 ${
+        className={`flex-1 flex flex-col min-w-0 h-full min-h-0 transition-[padding] duration-200 ${
           sidebarCollapsed ? 'lg:pl-[72px]' : 'lg:pl-64'
         }`}
       >
         {/* Top Bar */}
-        <header className="sticky top-0 z-30 h-14 px-4 sm:px-6 lg:px-8 border-b border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5]/95 dark:bg-[#181715]/95 backdrop-blur-sm flex items-center justify-between gap-4">
+        <header className="shrink-0 z-30 h-14 px-4 sm:px-6 lg:px-8 border-b border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5]/95 dark:bg-[#181715]/95 backdrop-blur-sm flex items-center justify-between gap-4">
           <h1 className="text-base sm:text-lg font-semibold truncate">{activeNav.label}</h1>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -329,6 +343,12 @@ export default function App() {
           </div>
         </header>
 
+        {/* Vùng nội dung cuộn riêng: thanh tab dưới luôn hiện, trang không bị kéo giãn */}
+        <div
+          ref={scrollRef}
+          {...swipeHandlers}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-y-none"
+        >
         {/* Global Shared Query Filter Bar */}
         {dataset && showGlobalFilters && dataset.imports.length > 0 && (
           <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl w-full mx-auto">
@@ -388,7 +408,10 @@ export default function App() {
         )}
 
         {/* Viewport Content */}
-        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 pb-24 lg:pb-8 max-w-7xl w-full mx-auto">
+        <main
+          key={activeTab}
+          className="animate-tab-in px-4 sm:px-6 lg:px-8 py-5 pb-6 lg:pb-8 max-w-7xl w-full mx-auto"
+        >
           {loading && !dataset ? (
             <div className="space-y-4">
               <div className="h-28 rounded-xl bg-[#F3F1EC] dark:bg-[#22211E] animate-pulse" />
@@ -442,35 +465,36 @@ export default function App() {
             </>
           ) : null}
         </main>
-      </div>
-
-      {/* Mobile Bottom Navigation Bar (All 5 Tabs Directly Accessible on iPhone PWA) */}
-      <nav
-        aria-label="Điều hướng di động"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5]/95 dark:bg-[#181715]/95 backdrop-blur-md pb-safe"
-      >
-        <div className="grid grid-cols-5 h-16 items-center">
-          {NAV_ITEMS.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium ${
-                  active
-                    ? 'text-[#C96442]'
-                    : 'text-[#6B6963] dark:text-[#A6A39B]'
-                }`}
-              >
-                <Icon className="w-5 h-5 mb-0.5" />
-                <span className="truncate max-w-full px-1">{tab.mobileLabel}</span>
-              </button>
-            );
-          })}
         </div>
-      </nav>
+
+        {/* Mobile Bottom Navigation Bar (All 5 Tabs Directly Accessible on iPhone PWA) */}
+        <nav
+          aria-label="Điều hướng di động"
+          className="lg:hidden shrink-0 z-40 border-t border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5]/95 dark:bg-[#181715]/95 backdrop-blur-md pb-safe"
+        >
+          <div className="grid grid-cols-5 h-16 items-center">
+            {NAV_ITEMS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium ${
+                    active
+                      ? 'text-[#C96442]'
+                      : 'text-[#6B6963] dark:text-[#A6A39B]'
+                  }`}
+                >
+                  <Icon className="w-5 h-5 mb-0.5" />
+                  <span className="truncate max-w-full px-1">{tab.mobileLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      </div>
 
       <OfflineIndicator />
     </div>
