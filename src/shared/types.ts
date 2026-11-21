@@ -209,8 +209,9 @@ export interface PriceObservation {
   symbol: string;
   observedDate: string; // YYYY-MM-DD
   observedTime: string; // HH:mm
-  timeframe: ObservationTimeframe;
-  session: TradingSessionName;
+  /** Không còn nhập từ giao diện; bản ghi cũ vẫn giữ giá trị đã lưu. */
+  timeframe: ObservationTimeframe | '';
+  session: TradingSessionName | '';
   priceAction: string;
   candlePattern: string;
   marketContext: string;

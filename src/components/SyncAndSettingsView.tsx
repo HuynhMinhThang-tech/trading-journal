@@ -9,7 +9,9 @@ import {
   RefreshCw,
   Upload,
 } from 'lucide-react';
-import type { ParsedStatement, WorkspaceDataset } from '../shared/types.ts';
+import { Pagination } from './Pagination.tsx';
+import { usePagination } from '../hooks/usePagination.ts';
+import type { ParsedStatement, SyncLogRecord, WorkspaceDataset } from '../shared/types.ts';
 
 interface SyncAndSettingsViewProps {
   dataset: WorkspaceDataset;
@@ -23,6 +25,23 @@ const BROKER_TZ_OPTIONS = [
   { value: 'UTC+0', label: 'UTC+0 (GMT)' },
   { value: 'UTC+7', label: 'UTC+7 (Giờ Việt Nam)' },
 ];
+
+const LOG_PAGE_SIZE = 10;
+
+const LOG_STATUS_META: Record<SyncLogRecord['status'], { label: string; className: string }> = {
+  imported: { label: 'Đã nhập', className: 'text-win' },
+  partial: { label: 'Nhập có cảnh báo', className: 'text-amber-700 dark:text-amber-400' },
+  skipped_duplicate: { label: 'Trùng, đã bỏ qua', className: 'text-[#55534D] dark:text-[#C2BFB6]' },
+  no_new_email: { label: 'Không có email mới', className: 'text-[#55534D] dark:text-[#C2BFB6]' },
+  rejected: { label: 'Bị từ chối', className: 'text-loss' },
+  failed: { label: 'Lỗi', className: 'text-loss' },
+};
+
+const LOG_SOURCE_LABELS: Record<SyncLogRecord['source'], string> = {
+  gmail: 'Gmail',
+  eml: 'EML',
+  paste: 'Dán tay',
+};
 
 const SAMPLE_VANTAGE_TEXT = `A/C No: 26818392\tName: MINH THANG HUYNH\tCurrency: USD\t2026.10.22 23:59
 Orders:
@@ -74,6 +93,8 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
     error: string | null;
   }>({ loaded: false, configured: false, email: null, error: null });
   const [lookbackDays, setLookbackDays] = useState<number>(14);
+  const [rescan, setRescan] = useState(false);
+  const [hideDuplicateLogs, setHideDuplicateLogs] = useState(true);
   const [gmailBusy, setGmailBusy] = useState(false);
   const [gmailMessage, setGmailMessage] = useState<string | null>(null);
   const [gmailError, setGmailError] = useState<string | null>(null);
@@ -128,6 +149,13 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 
   const lastGmailSync = dataset.syncLogs.find((l) => l.source === 'gmail');
 
+  // Nhật ký đồng bộ: ẩn các dòng "trùng" (mặc định) và phân trang
+  const duplicateLogCount = dataset.syncLogs.filter((l) => l.status === 'skipped_duplicate').length;
+  const visibleLogs = hideDuplicateLogs
+    ? dataset.syncLogs.filter((l) => l.status !== 'skipped_duplicate')
+    : dataset.syncLogs;
+  const logPagination = usePagination(visibleLogs, LOG_PAGE_SIZE, String(hideDuplicateLogs));
+
   const handleGmailSync = async (dryRun: boolean) => {
     setGmailBusy(true);
     setGmailError(null);
@@ -136,7 +164,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       const res = await fetch('/api/gmail/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: lookbackDays, dryRun }),
+        body: JSON.stringify({ days: lookbackDays, dryRun, rescan }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -253,7 +281,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'gmail'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                  : 'text-[#6B6963] dark:text-[#A6A39B]'
+                  : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <Mail className="w-3.5 h-3.5" />
@@ -265,7 +293,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'paste'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                  : 'text-[#6B6963] dark:text-[#A6A39B]'
+                  : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
@@ -277,7 +305,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'eml'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                  : 'text-[#6B6963] dark:text-[#A6A39B]'
+                  : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <Upload className="w-3.5 h-3.5" />
@@ -289,7 +317,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
         {methodTab === 'gmail' && (
           <div className="mt-5 space-y-4">
             {!gmailStatus.loaded ? (
-              <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Đang kiểm tra kết nối...</p>
+              <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Đang kiểm tra kết nối...</p>
             ) : !gmailStatus.configured ? (
               <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-50/70 dark:bg-red-950/30 p-3 text-xs text-loss">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -312,11 +340,17 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                         : `Tự động đồng bộ · ${gmailStatus.email ?? 'Gmail đã kết nối'}`}
                     </span>
                   </div>
-                  <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                  <span className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                     Lần gần nhất:{' '}
                     {lastGmailSync ? new Date(lastGmailSync.createdAt).toLocaleString('vi-VN') : '—'}
                   </span>
                 </div>
+
+                <p className="text-xs leading-relaxed text-[#55534D] dark:text-[#C2BFB6]">
+                  Hệ thống tự quét lúc 05:30 và 18:00 (giờ Việt Nam) mỗi ngày và khi bạn mở ứng dụng (tối đa 15 phút
+                  một lần). Chỉ email Daily Confirmation chưa xử lý mới được tải về; email đã nhập hoặc trùng sẽ không
+                  bị quét lại.
+                </p>
 
                 <div className="flex flex-wrap items-end gap-3">
                   <div>
@@ -350,6 +384,16 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                     <span>Quét thử (Dry-run)</span>
                   </button>
                 </div>
+
+                <label className="inline-flex items-center gap-2 text-xs text-[#55534D] dark:text-[#C2BFB6] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rescan}
+                    onChange={(e) => setRescan(e.target.checked)}
+                    className="h-4 w-4 accent-[#C96442]"
+                  />
+                  <span>Quét lại cả email đã xử lý (chỉ dùng khi cần nhập lại; vẫn không tạo dữ liệu trùng)</span>
+                </label>
               </>
             )}
 
@@ -368,7 +412,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 
             {gmailPreviews.length > 0 && (
               <div className="space-y-2 pt-2">
-                <h4 className="text-xs font-semibold text-[#6B6963] dark:text-[#A6A39B]">
+                <h4 className="text-xs font-semibold text-[#55534D] dark:text-[#C2BFB6]">
                   Kết quả quét Gmail ({gmailPreviews.length} email):
                 </h4>
                 {gmailPreviews.map((p) => (
@@ -378,7 +422,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                   >
                     <div>
                       <span className="font-mono-num font-semibold">{p.reportTimestampRaw || 'N/A'}</span>{' '}
-                      <span className="text-[#6B6963] dark:text-[#A6A39B]">
+                      <span className="text-[#55534D] dark:text-[#C2BFB6]">
                         · TK {p.accountNumber} · {p.ordersCount} Orders · {p.dealsCount} Deals
                       </span>
                     </div>
@@ -484,25 +528,25 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Tài khoản</span>
+                <span className="text-[#55534D] dark:text-[#C2BFB6]">Tài khoản</span>
                 <p className="mt-1 font-mono-num font-semibold">
                   {previewStatement.header.accountNumber || '—'} ({previewStatement.header.currency})
                 </p>
               </div>
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Thời gian báo cáo</span>
+                <span className="text-[#55534D] dark:text-[#C2BFB6]">Thời gian báo cáo</span>
                 <p className="mt-1 font-mono-num font-semibold">
                   {previewStatement.header.reportTimestampRaw || '—'}
                 </p>
               </div>
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Dòng ghi nhận</span>
+                <span className="text-[#55534D] dark:text-[#C2BFB6]">Dòng ghi nhận</span>
                 <p className="mt-1 font-mono-num font-semibold">
                   {previewStatement.orders.length} Orders · {previewStatement.deals.length} Deals
                 </p>
               </div>
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Closed P/L → Balance</span>
+                <span className="text-[#55534D] dark:text-[#C2BFB6]">Closed P/L → Balance</span>
                 <p className="mt-1 font-mono-num font-semibold">
                   {previewStatement.summary.closedTradePL} → ${previewStatement.summary.balance}
                 </p>
@@ -518,7 +562,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           <h3 className="text-sm font-semibold">Cài đặt tài khoản & Lưu trữ</h3>
           <div className="inline-flex items-center gap-1.5 text-xs font-medium shrink-0">
             <Database className="w-3.5 h-3.5 text-[#C96442]" />
-            <span className={dataset.dbConnected ? 'text-win' : 'text-[#6B6963] dark:text-[#A6A39B]'}>
+            <span className={dataset.dbConnected ? 'text-win' : 'text-[#55534D] dark:text-[#C2BFB6]'}>
               {dataset.dbConnected ? 'Neon PostgreSQL: Đã kết nối' : 'Bộ nhớ tạm (chưa có DATABASE_URL)'}
             </span>
           </div>
@@ -605,7 +649,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             })}
           </div>
         ) : (
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Chưa có tài khoản nào.</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Chưa có tài khoản nào.</p>
         )}
 
         <div className="pt-3 border-t border-[#E7E5E0] dark:border-[#32302B] flex flex-wrap items-center justify-between gap-3">
@@ -674,37 +718,65 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 
       {/* 3. Sync History */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-        <h3 className="text-sm font-semibold mb-3">
-          Lịch sử nhập báo cáo ({dataset.imports.length}) & Nhật ký đồng bộ ({dataset.syncLogs.length})
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h3 className="text-sm font-semibold">
+            Lịch sử nhập báo cáo ({dataset.imports.length}) & Nhật ký đồng bộ ({visibleLogs.length})
+          </h3>
+          {duplicateLogCount > 0 && (
+            <label className="inline-flex items-center gap-2 text-xs text-[#55534D] dark:text-[#C2BFB6] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hideDuplicateLogs}
+                onChange={(e) => setHideDuplicateLogs(e.target.checked)}
+                className="h-4 w-4 accent-[#C96442]"
+              />
+              <span>Ẩn bản ghi trùng ({duplicateLogCount})</span>
+            </label>
+          )}
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          {/* Mã, thời điểm và ghi chú là chữ/định danh nên căn trái; tiêu đề cùng hướng với ô */}
+          <table className="w-full min-w-[860px] table-fixed text-left text-xs">
+            <colgroup>
+              <col className="w-[170px]" />
+              <col className="w-[84px]" />
+              <col className="w-[104px]" />
+              <col className="w-[148px]" />
+              <col className="w-[164px]" />
+              <col />
+            </colgroup>
             <thead>
-              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963] dark:text-[#A6A39B]">
-                <th className="py-2 font-medium">Thời điểm</th>
-                <th className="py-2 font-medium">Nguồn</th>
-                <th className="py-2 font-medium">Tài khoản</th>
-                <th className="py-2 font-medium">Báo cáo gốc</th>
-                <th className="py-2 font-medium">Trạng thái & Ghi chú</th>
+              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6]">
+                <th className="py-2 pr-3 font-semibold text-left">Thời điểm</th>
+                <th className="py-2 px-3 font-semibold text-left">Nguồn</th>
+                <th className="py-2 px-3 font-semibold text-left">Tài khoản</th>
+                <th className="py-2 px-3 font-semibold text-left">Báo cáo gốc</th>
+                <th className="py-2 px-3 font-semibold text-left">Trạng thái</th>
+                <th className="py-2 pl-3 font-semibold text-left">Ghi chú</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70">
-              {dataset.syncLogs.map((l) => (
-                <tr key={l.id}>
-                  <td className="py-2.5 font-mono-num text-[#6B6963] dark:text-[#A6A39B] whitespace-nowrap">
-                    {new Date(l.createdAt).toLocaleString('vi-VN')}
-                  </td>
-                  <td className="py-2.5 uppercase">{l.source}</td>
-                  <td className="py-2.5 font-mono-num">{l.accountNumber ?? '—'}</td>
-                  <td className="py-2.5 font-mono-num">{l.reportTimestampRaw ?? '—'}</td>
-                  <td className="py-2.5">
-                    <span className="font-medium">{l.status}</span> · {l.message}
-                  </td>
-                </tr>
-              ))}
-              {dataset.syncLogs.length === 0 && (
+              {logPagination.pageItems.map((l) => {
+                const meta = LOG_STATUS_META[l.status] ?? { label: l.status, className: '' };
+                return (
+                  <tr key={l.id} className="align-top">
+                    <td className="py-2.5 pr-3 text-left font-mono-num text-[#55534D] dark:text-[#C2BFB6] whitespace-nowrap">
+                      {new Date(l.createdAt).toLocaleString('vi-VN')}
+                    </td>
+                    <td className="py-2.5 px-3 text-left font-semibold">{LOG_SOURCE_LABELS[l.source] ?? l.source}</td>
+                    <td className="py-2.5 px-3 text-left font-mono-num">{l.accountNumber ?? '—'}</td>
+                    <td className="py-2.5 px-3 text-left font-mono-num whitespace-nowrap">
+                      {l.reportTimestampRaw ?? '—'}
+                    </td>
+                    <td className={`py-2.5 px-3 text-left font-semibold ${meta.className}`}>{meta.label}</td>
+                    <td className="py-2.5 pl-3 text-left break-words">{l.message}</td>
+                  </tr>
+                );
+              })}
+              {visibleLogs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-[#6B6963]">
+                  <td colSpan={6} className="py-6 text-center text-[#55534D] dark:text-[#C2BFB6]">
                     Chưa có lịch sử đồng bộ nào.
                   </td>
                 </tr>
@@ -712,6 +784,15 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          page={logPagination.page}
+          totalPages={logPagination.totalPages}
+          total={logPagination.total}
+          pageSize={logPagination.pageSize}
+          onPageChange={logPagination.setPage}
+          unit="bản ghi"
+        />
       </div>
     </div>
   );

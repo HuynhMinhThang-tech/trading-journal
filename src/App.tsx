@@ -283,7 +283,7 @@ export default function App() {
             onClick={() => setSidebarCollapsed((v) => !v)}
             title={sidebarCollapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'}
             aria-label={sidebarCollapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'}
-            className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-[#6B6963] dark:text-[#A6A39B] hover:bg-[#F3F1EC] dark:hover:bg-[#22211E] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] transition-colors shrink-0"
+            className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-[#55534D] dark:text-[#C2BFB6] hover:bg-[#F3F1EC] dark:hover:bg-[#22211E] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] transition-colors shrink-0"
           >
             {sidebarCollapsed ? (
               <PanelLeftOpen className="w-4 h-4" />
@@ -309,12 +309,12 @@ export default function App() {
                 } ${
                   isActive
                     ? 'bg-[#FFFFFF] dark:bg-[#22211E] text-[#1C1B18] dark:text-[#F2EFE9] font-semibold border border-[#E7E5E0] dark:border-[#32302B]'
-                    : 'text-[#6B6963] dark:text-[#A6A39B] hover:bg-[#F3F1EC] dark:hover:bg-[#22211E]/60 hover:text-[#1C1B18] dark:hover:text-[#F2EFE9]'
+                    : 'text-[#55534D] dark:text-[#C2BFB6] hover:bg-[#F3F1EC] dark:hover:bg-[#22211E]/60 hover:text-[#1C1B18] dark:hover:text-[#F2EFE9]'
                 }`}
               >
                 <Icon
                   className={`w-4 h-4 shrink-0 ${
-                    isActive ? 'text-[#C96442]' : 'text-[#6B6963] dark:text-[#A6A39B]'
+                    isActive ? 'text-[#C96442]' : 'text-[#55534D] dark:text-[#C2BFB6]'
                   }`}
                 />
                 {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
@@ -397,7 +397,7 @@ export default function App() {
                 ))}
               </select>
 
-              <label className="inline-flex items-center gap-1.5 text-[#6B6963] dark:text-[#A6A39B]">
+              <label className="inline-flex items-center gap-1.5 text-[#55534D] dark:text-[#C2BFB6]">
                 <span>Từ</span>
                 <input
                   type="date"
@@ -407,7 +407,7 @@ export default function App() {
                   className={`${FILTER_FIELD_CLASS} font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]`}
                 />
               </label>
-              <label className="inline-flex items-center gap-1.5 text-[#6B6963] dark:text-[#A6A39B]">
+              <label className="inline-flex items-center gap-1.5 text-[#55534D] dark:text-[#C2BFB6]">
                 <span>đến</span>
                 <input
                   type="date"
@@ -533,7 +533,7 @@ export default function App() {
                   className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium ${
                     active
                       ? 'text-[#C96442]'
-                      : 'text-[#6B6963] dark:text-[#A6A39B]'
+                      : 'text-[#55534D] dark:text-[#C2BFB6]'
                   }`}
                 >
                   <Icon className="w-5 h-5 mb-0.5" />

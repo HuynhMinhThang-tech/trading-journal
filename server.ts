@@ -44,6 +44,7 @@ const gmailSyncSchema = z.object({
   days: z.number().int().min(1).max(365).optional().default(14),
   dryRun: z.boolean().optional().default(false),
   trigger: z.enum(['manual', 'auto']).optional().default('manual'),
+  rescan: z.boolean().optional().default(false),
 });
 
 const journalSchema = z.object({
@@ -66,8 +67,9 @@ const observationSchema = z.object({
   symbol: z.string().min(1, 'Vui lòng nhập mã quan sát'),
   observedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải có dạng YYYY-MM-DD'),
   observedTime: z.string().regex(/^\d{2}:\d{2}$/, 'Giờ phải có dạng HH:mm'),
-  timeframe: z.enum(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']),
-  session: z.enum(['Á', 'Âu', 'Mỹ', 'Giao phiên Âu-Mỹ']),
+  // Khung thời gian và phiên không còn bắt buộc (giao diện đã bỏ); bản ghi cũ vẫn giữ giá trị đã lưu.
+  timeframe: z.enum(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', '']).default(''),
+  session: z.enum(['Á', 'Âu', 'Mỹ', 'Giao phiên Âu-Mỹ', '']).default(''),
   priceAction: z.string().min(1, 'Vui lòng nhập mô tả hành động giá'),
   candlePattern: z.string().min(1, 'Vui lòng nhập đặc điểm nến'),
   marketContext: z.string().default(''),

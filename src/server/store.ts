@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import type {
@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   message TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_sync_logs_gmail_msg ON sync_logs(gmail_message_id);
 `;
 
 export async function initDatabase(): Promise<{ connected: boolean; error: string | null }> {
@@ -265,7 +266,7 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       db.select().from(schema.journalEntries),
       db.select().from(schema.priceObservations).orderBy(desc(schema.priceObservations.observedDate), desc(schema.priceObservations.observedTime)),
       db.select().from(schema.reviewOverrides),
-      db.select().from(schema.syncLogs).orderBy(desc(schema.syncLogs.createdAt)).limit(50),
+      db.select().from(schema.syncLogs).orderBy(desc(schema.syncLogs.createdAt)).limit(200),
     ]);
 
     const accounts: TradingAccountRecord[] = acctRows.map((a) => ({
@@ -748,10 +749,27 @@ export async function commitParsedStatement(
   }
 
   // Memory fallback
-  if (
-    (meta.gmailMessageId && mem.imports.some((im) => im.gmailMessageId === meta.gmailMessageId)) ||
-    mem.imports.some((im) => im.accountId === acctId && im.checksum === parsed.checksum)
-  ) {
+  if (meta.gmailMessageId && mem.imports.some((im) => im.gmailMessageId === meta.gmailMessageId)) {
+    return {
+      status: 'skipped_duplicate',
+      message: `Email (ID ${meta.gmailMessageId}) đã được nhập trước đó.`,
+    };
+  }
+  if (mem.imports.some((im) => im.accountId === acctId && im.checksum === parsed.checksum)) {
+    // Ghi nhật ký giống nhánh database để email Gmail này được ghi nhớ là đã xử lý.
+    await recordSyncLog({
+      source: meta.source,
+      gmailMessageId: meta.gmailMessageId ?? null,
+      sender: meta.sender ?? null,
+      subject: meta.subject ?? null,
+      emailDateHeader: meta.emailDateHeader ?? null,
+      reportTimestampRaw: parsed.header.reportTimestampRaw,
+      accountNumber: acctNum,
+      ordersCount: parsed.orders.length,
+      dealsCount: parsed.deals.length,
+      status: 'skipped_duplicate',
+      message: `Báo cáo ngày ${parsed.header.reportTimestampRaw} của tài khoản ${acctNum} đã tồn tại (chống trùng).`,
+    });
     return {
       status: 'skipped_duplicate',
       message: `Báo cáo ngày ${parsed.header.reportTimestampRaw} đã tồn tại — bỏ qua để tránh trùng lặp.`,
@@ -843,6 +861,50 @@ export async function commitParsedStatement(
     message: msg,
   });
   return { status: finalStatus, message: msg, importId };
+}
+
+// Trạng thái nhật ký coi là "email này đã được xử lý xong, không cần tải về/phân tích lại".
+// Gồm cả email trùng báo cáo đã nhập bằng tay/.eml (skipped_duplicate): trước đây các email này
+// không bao giờ được ghi nhớ nên lần đồng bộ nào cũng tải về, phân tích và ghi thêm một dòng nhật ký trùng.
+const PROCESSED_LOG_STATUSES = ['imported', 'partial', 'skipped_duplicate', 'rejected'];
+
+/** Trả về tập ID email Gmail (trong danh sách đưa vào) đã được xử lý ở các lần đồng bộ trước. */
+export async function getProcessedGmailMessageIds(messageIds: string[]): Promise<Set<string>> {
+  const processed = new Set<string>();
+  if (messageIds.length === 0) return processed;
+
+  if (dbReady && db) {
+    const [importRows, logRows] = await Promise.all([
+      db
+        .select({ id: schema.statementImports.gmailMessageId })
+        .from(schema.statementImports)
+        .where(inArray(schema.statementImports.gmailMessageId, messageIds)),
+      db
+        .select({ id: schema.syncLogs.gmailMessageId })
+        .from(schema.syncLogs)
+        .where(
+          and(
+            inArray(schema.syncLogs.gmailMessageId, messageIds),
+            inArray(schema.syncLogs.status, PROCESSED_LOG_STATUSES),
+          ),
+        ),
+    ]);
+    for (const row of [...importRows, ...logRows]) {
+      if (row.id) processed.add(row.id);
+    }
+    return processed;
+  }
+
+  const wanted = new Set(messageIds);
+  for (const im of mem.imports) {
+    if (im.gmailMessageId && wanted.has(im.gmailMessageId)) processed.add(im.gmailMessageId);
+  }
+  for (const log of mem.syncLogs) {
+    if (log.gmailMessageId && wanted.has(log.gmailMessageId) && PROCESSED_LOG_STATUSES.includes(log.status)) {
+      processed.add(log.gmailMessageId);
+    }
+  }
+  return processed;
 }
 
 export async function recordSyncLog(entry: Omit<SyncLogRecord, 'id' | 'createdAt'>): Promise<void> {

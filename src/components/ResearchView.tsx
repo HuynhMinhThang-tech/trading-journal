@@ -1,13 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { CalendarDays, Edit3, List, Plus, Search, Star, Trash2, X } from 'lucide-react';
 import { MonthCalendar } from './MonthCalendar.tsx';
+import { Pagination } from './Pagination.tsx';
+import { usePagination } from '../hooks/usePagination.ts';
 import { formatIsoDisplay, todayIso } from '../lib/dateUtils.ts';
 import { formatClock } from '../lib/format.ts';
-import type {
-  ObservationTimeframe,
-  PriceObservation,
-  TradingSessionName,
-} from '../shared/types.ts';
+import type { PriceObservation } from '../shared/types.ts';
 
 interface ResearchViewProps {
   observations: PriceObservation[];
@@ -19,26 +17,7 @@ interface ResearchViewProps {
   onDelete: (id: string) => Promise<void>;
 }
 
-const TIMEFRAMES: ObservationTimeframe[] = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
-const SESSIONS: TradingSessionName[] = ['Á', 'Âu', 'Mỹ', 'Giao phiên Âu-Mỹ'];
-
-const QUICK_PRICE_ACTIONS = [
-  'Quét thanh khoản 2 đầu',
-  'Phá vỡ giả (Fakeout)',
-  'Pullback về vùng cung/cầu',
-  'Mở rộng biên độ đầu phiên',
-  'Tích lũy trong biên độ hẹp',
-  'Đảo chiều chữ V tại mốc tròn',
-];
-
-const QUICK_CANDLES = [
-  'Pin Bar rút râu dài',
-  'Nhấn chìm tăng (Bullish Engulfing)',
-  'Nhấn chìm giảm (Bearish Engulfing)',
-  'Marubozu lực mạnh',
-  'Inside Bar nén lực',
-  'Doji lưỡng lự',
-];
+const PAGE_SIZE = 10;
 
 export const ResearchView: React.FC<ResearchViewProps> = ({
   observations,
@@ -48,8 +27,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [symbolFilter, setSymbolFilter] = useState('ALL');
-  const [tfFilter, setTfFilter] = useState<'ALL' | ObservationTimeframe>('ALL');
-  const [sessionFilter, setSessionFilter] = useState<'ALL' | TradingSessionName>('ALL');
 
   // Chế độ xem: danh sách (bảng) hoặc lịch
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -67,8 +44,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const [symbol, setSymbol] = useState('NAS100ft');
   const [observedDate, setObservedDate] = useState(() => todayIso());
   const [observedTime, setObservedTime] = useState(() => formatClock(new Date()));
-  const [timeframe, setTimeframe] = useState<ObservationTimeframe>('M15');
-  const [session, setSession] = useState<TradingSessionName>('Mỹ');
   const [priceAction, setPriceAction] = useState('');
   const [candlePattern, setCandlePattern] = useState('');
   const [marketContext, setMarketContext] = useState('');
@@ -85,8 +60,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const baseFiltered = useMemo(() => {
     return observations.filter((o) => {
       if (symbolFilter !== 'ALL' && o.symbol !== symbolFilter) return false;
-      if (tfFilter !== 'ALL' && o.timeframe !== tfFilter) return false;
-      if (sessionFilter !== 'ALL' && o.session !== sessionFilter) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         const hay = `${o.symbol} ${o.priceAction} ${o.candlePattern} ${o.marketContext} ${o.habitTag} ${o.outcomeNote}`.toLowerCase();
@@ -94,13 +67,15 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       }
       return true;
     });
-  }, [observations, symbolFilter, tfFilter, sessionFilter, search]);
+  }, [observations, symbolFilter, search]);
 
   // Bảng: thêm lọc theo ngày khi bấm từ lịch
   const filtered = useMemo(
     () => (dayFilter ? baseFiltered.filter((o) => o.observedDate === dayFilter) : baseFiltered),
     [baseFiltered, dayFilter],
   );
+
+  const pagination = usePagination(filtered, PAGE_SIZE, `${symbolFilter}|${search}|${dayFilter ?? ''}`);
 
   // Lịch: gom quan sát theo ngày
   const byDay = useMemo(() => {
@@ -131,15 +106,14 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const habitSummary = useMemo(() => {
     const groups = new Map<
       string,
-      { key: string; symbol: string; session: string; habit: string; count: number; totalConf: number }
+      { key: string; symbol: string; habit: string; count: number; totalConf: number }
     >();
     for (const o of filtered) {
       const label = o.habitTag.trim() || o.priceAction.trim();
-      const k = `${o.symbol}::${o.session}::${label}`;
+      const k = `${o.symbol}::${label}`;
       const existing = groups.get(k) ?? {
         key: k,
         symbol: o.symbol,
-        session: o.session,
         habit: label,
         count: 0,
         totalConf: 0,
@@ -158,8 +132,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     setSymbol('NAS100ft');
     setObservedDate(presetDate ?? todayIso());
     setObservedTime(formatClock(new Date()));
-    setTimeframe('M15');
-    setSession('Mỹ');
     setPriceAction('');
     setCandlePattern('');
     setMarketContext('');
@@ -174,8 +146,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     setSymbol(obs.symbol);
     setObservedDate(obs.observedDate);
     setObservedTime(obs.observedTime);
-    setTimeframe(obs.timeframe);
-    setSession(obs.session);
     setPriceAction(obs.priceAction);
     setCandlePattern(obs.candlePattern);
     setMarketContext(obs.marketContext);
@@ -188,12 +158,14 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    // Giữ nguyên khung thời gian / phiên đã lưu của bản ghi cũ khi sửa; bản ghi mới để trống.
+    const original = editingId ? observations.find((o) => o.id === editingId) : undefined;
     const payload = {
       symbol: symbol.trim(),
       observedDate,
       observedTime,
-      timeframe,
-      session,
+      timeframe: original?.timeframe ?? ('' as const),
+      session: original?.session ?? ('' as const),
       priceAction: priceAction.trim(),
       candlePattern: candlePattern.trim(),
       marketContext: marketContext.trim(),
@@ -244,7 +216,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                     viewMode === t.id
                       ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
-                      : 'text-[#6B6963] dark:text-[#A6A39B]'
+                      : 'text-[#55534D] dark:text-[#C2BFB6]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -269,7 +241,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold">Tổng hợp thói quen giá nổi bật</h3>
-            <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
               Từ {filtered.length} quan sát đang lọc
             </span>
           </div>
@@ -279,9 +251,9 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                 key={h.key}
                 className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] p-3.5"
               >
-                <div className="flex items-center justify-between text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                <div className="flex items-center justify-between text-xs text-[#55534D] dark:text-[#C2BFB6]">
                   <span>
-                    <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">{h.symbol}</strong> · Phiên {h.session}
+                    <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">{h.symbol}</strong>
                   </span>
                   <span className="font-mono-num font-semibold text-[#C96442]">
                     {h.count} lần
@@ -290,7 +262,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                 <p className="mt-1.5 text-sm font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
                   {h.habit}
                 </p>
-                <p className="mt-1 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                   Độ tin cậy TB: {(h.totalConf / h.count).toFixed(1)}/5
                 </p>
               </div>
@@ -305,7 +277,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
         className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4"
       >
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-[#6B6963] absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#55534D] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={search}
@@ -338,32 +310,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               </option>
             ))}
           </select>
-
-          <select
-            value={tfFilter}
-            onChange={(e) => setTfFilter(e.target.value as 'ALL' | ObservationTimeframe)}
-            className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-xs font-medium min-h-[40px]"
-          >
-            <option value="ALL">Mọi khung</option>
-            {TIMEFRAMES.map((tf) => (
-              <option key={tf} value={tf}>
-                {tf}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={sessionFilter}
-            onChange={(e) => setSessionFilter(e.target.value as 'ALL' | TradingSessionName)}
-            className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-xs font-medium min-h-[40px]"
-          >
-            <option value="ALL">Mọi phiên</option>
-            {SESSIONS.map((s) => (
-              <option key={s} value={s}>
-                Phiên {s}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
@@ -372,24 +318,33 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       {/* Desktop Table */}
       <div className="hidden lg:block rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          {/* Cột chữ căn trái, cột số (Tin cậy) và Thao tác căn phải; tiêu đề cùng hướng với ô */}
+          <table className="w-full min-w-[900px] table-fixed text-left text-xs">
+            <colgroup>
+              <col className="w-[110px]" />
+              <col className="w-[116px]" />
+              <col />
+              <col className="w-[190px]" />
+              <col className="w-[230px]" />
+              <col className="w-[80px]" />
+              <col className="w-[96px]" />
+            </colgroup>
             <thead>
-              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] text-[#6B6963] dark:text-[#A6A39B]">
-                <th className="py-3 px-4 font-medium">Mã</th>
-                <th className="py-3 px-3 font-medium">Ngày · Giờ</th>
-                <th className="py-3 px-3 font-medium">Khung · Phiên</th>
-                <th className="py-3 px-3 font-medium">Hành động giá</th>
-                <th className="py-3 px-3 font-medium">Đặc điểm nến</th>
-                <th className="py-3 px-3 font-medium">Bối cảnh & Tin tức</th>
-                <th className="py-3 px-3 font-medium text-right">Tin cậy</th>
-                <th className="py-3 px-4 font-medium text-right">Thao tác</th>
+              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] text-[#55534D] dark:text-[#C2BFB6]">
+                <th className="py-3 px-4 font-semibold text-left">Mã</th>
+                <th className="py-3 px-3 font-semibold text-left">Ngày · Giờ</th>
+                <th className="py-3 px-3 font-semibold text-left">Hành động giá</th>
+                <th className="py-3 px-3 font-semibold text-left">Đặc điểm nến</th>
+                <th className="py-3 px-3 font-semibold text-left">Bối cảnh & Tin tức</th>
+                <th className="py-3 px-3 font-semibold text-right">Tin cậy</th>
+                <th className="py-3 px-4 font-semibold text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70">
-              {filtered.map((o) => (
-                <tr key={o.id} className="hover:bg-[#FAF9F5] dark:hover:bg-[#2A2925]/50">
-                  <td className="py-3 px-4 font-semibold">{o.symbol}</td>
-                  <td className="py-3 px-3 font-mono-num whitespace-nowrap">
+              {pagination.pageItems.map((o) => (
+                <tr key={o.id} className="align-top hover:bg-[#FAF9F5] dark:hover:bg-[#2A2925]/50">
+                  <td className="py-3 px-4 text-left font-semibold">{o.symbol}</td>
+                  <td className="py-3 px-3 text-left font-mono-num whitespace-nowrap">
                     <button
                       type="button"
                       onClick={() => {
@@ -403,22 +358,16 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     >
                       {o.observedDate}
                     </button>
-                    <div className="text-[11px] text-[#6B6963] dark:text-[#A6A39B]">{o.observedTime}</div>
+                    <div className="text-[11px] text-[#55534D] dark:text-[#C2BFB6]">{o.observedTime}</div>
                   </td>
-                  <td className="py-3 px-3 whitespace-nowrap text-[#6B6963] dark:text-[#A6A39B]">
-                    <span className="font-mono-num font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-                      {o.timeframe}
-                    </span>{' '}
-                    · Phiên {o.session}
-                  </td>
-                  <td className="py-3 px-3 max-w-[200px]">
-                    <div className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">{o.priceAction}</div>
+                  <td className="py-3 px-3 text-left break-words">
+                    <div className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">{o.priceAction}</div>
                     {o.habitTag && (
                       <div className="mt-0.5 text-[11px] text-[#C96442]">Thói quen: {o.habitTag}</div>
                     )}
                   </td>
-                  <td className="py-3 px-3 max-w-[180px]">{o.candlePattern}</td>
-                  <td className="py-3 px-3 max-w-[220px] text-[#6B6963] dark:text-[#A6A39B]">
+                  <td className="py-3 px-3 text-left break-words">{o.candlePattern}</td>
+                  <td className="py-3 px-3 text-left break-words text-[#55534D] dark:text-[#C2BFB6]">
                     <div>{o.marketContext || '—'}</div>
                     {o.outcomeNote && (
                       <div className="mt-0.5 text-[11px] text-[#1C1B18] dark:text-[#F2EFE9]">
@@ -426,7 +375,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       </div>
                     )}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono-num whitespace-nowrap">
+                  <td className="py-3 px-3 text-right font-mono-num font-semibold whitespace-nowrap">
                     {o.confidence}/5
                   </td>
                   <td className="py-3 px-4 text-right whitespace-nowrap">
@@ -434,7 +383,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       <button
                         type="button"
                         onClick={() => openEditModal(o)}
-                        className="p-2 rounded-lg text-[#6B6963] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                        className="p-2 rounded-lg text-[#55534D] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                         aria-label="Sửa quan sát"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
@@ -442,7 +391,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onDelete(o.id)}
-                        className="p-2 rounded-lg text-[#6B6963] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                        className="p-2 rounded-lg text-[#55534D] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                         aria-label="Xóa quan sát"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -453,7 +402,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-sm text-[#6B6963]">
+                  <td colSpan={7} className="py-10 text-center text-sm text-[#55534D] dark:text-[#C2BFB6]">
                     Chưa có quan sát hành động giá nào.
                   </td>
                 </tr>
@@ -465,29 +414,29 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
 
       {/* Mobile Cards */}
       <div className="lg:hidden space-y-3">
-        {filtered.map((o) => (
+        {pagination.pageItems.map((o) => (
           <div
             key={o.id}
             className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 space-y-2"
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">
-                {o.symbol} · <span className="font-mono-num">{o.timeframe}</span> · Phiên {o.session}
+                {o.symbol}
               </div>
               <div className="flex items-center gap-1 text-xs font-mono-num text-[#C96442]">
                 <Star className="w-3.5 h-3.5 fill-current" />
                 <span>{o.confidence}/5</span>
               </div>
             </div>
-            <div className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            <div className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
               {o.observedDate} · {o.observedTime}
             </div>
             <div className="text-sm font-medium">{o.priceAction}</div>
-            <div className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+            <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
               <strong>Nến:</strong> {o.candlePattern}
             </div>
             {o.marketContext && (
-              <div className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+              <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
                 <strong>Bối cảnh:</strong> {o.marketContext}
               </div>
             )}
@@ -510,12 +459,20 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
           </div>
         ))}
         {filtered.length === 0 && (
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-8 text-center text-sm text-[#6B6963]">
+          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-8 text-center text-sm text-[#55534D]">
             Chưa có bản ghi quan sát nào.
           </div>
         )}
       </div>
 
+      <Pagination
+        page={pagination.page}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        pageSize={pagination.pageSize}
+        onPageChange={pagination.setPage}
+        unit="quan sát"
+      />
       </>
       )}
 
@@ -529,7 +486,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               setCalMonth(m);
             }}
             summary={
-              <span className="text-[#6B6963] dark:text-[#A6A39B]">
+              <span className="text-[#55534D] dark:text-[#C2BFB6]">
                 {monthObservationCount} quan sát trong tháng
               </span>
             }
@@ -559,7 +516,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold font-mono-num">
                   Ngày {formatIsoDisplay(selectedDay)}
-                  <span className="ml-2 font-normal text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                  <span className="ml-2 font-normal text-xs text-[#55534D] dark:text-[#C2BFB6]">
                     {selectedDayItems.length} quan sát
                   </span>
                 </h3>
@@ -588,7 +545,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               </div>
 
               {selectedDayItems.length === 0 ? (
-                <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
                   Chưa có quan sát nào trong ngày này.
                 </p>
               ) : (
@@ -601,8 +558,8 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs">
                           <strong className="text-sm">{o.symbol}</strong>
-                          <span className="ml-2 font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-                            {o.observedTime} · {o.timeframe} · Phiên {o.session}
+                          <span className="ml-2 font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+                            {o.observedTime}
                           </span>
                         </div>
                         <div className="flex items-center gap-1">
@@ -613,7 +570,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                           <button
                             type="button"
                             onClick={() => openEditModal(o)}
-                            className="p-2 rounded-lg text-[#6B6963] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                            className="p-2 rounded-lg text-[#55534D] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9] hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                             aria-label="Sửa quan sát"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
@@ -621,7 +578,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onDelete(o.id)}
-                            className="p-2 rounded-lg text-[#6B6963] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
+                            className="p-2 rounded-lg text-[#55534D] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                             aria-label="Xóa quan sát"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -629,14 +586,14 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                         </div>
                       </div>
                       <p className="text-sm font-medium">{o.priceAction}</p>
-                      <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                      <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
                         <strong>Nến:</strong> {o.candlePattern}
                       </p>
                       {o.habitTag && (
                         <p className="text-xs text-[#C96442] dark:text-[#D97757]">Thói quen: {o.habitTag}</p>
                       )}
                       {o.marketContext && (
-                        <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">
+                        <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
                           <strong>Bối cảnh:</strong> {o.marketContext}
                         </p>
                       )}
@@ -672,7 +629,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-medium mb-1">Mã quan sát *</label>
                   <input
@@ -704,55 +661,25 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm font-mono-num"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Khung thời gian *</label>
-                  <select
-                    value={timeframe}
-                    onChange={(e) => setTimeframe(e.target.value as ObservationTimeframe)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                  >
-                    {TIMEFRAMES.map((tf) => (
-                      <option key={tf} value={tf}>
-                        {tf}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">Phiên giao dịch *</label>
-                  <select
-                    value={session}
-                    onChange={(e) => setSession(e.target.value as TradingSessionName)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                  >
-                    {SESSIONS.map((s) => (
-                      <option key={s} value={s}>
-                        Phiên {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Độ tin cậy quan sát (1–5)</label>
-                  <div className="flex items-center gap-1.5 pt-1">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setConfidence(n)}
-                        className={`min-h-[38px] min-w-[38px] rounded-lg border text-xs font-mono-num font-semibold transition-colors ${
-                          confidence >= n
-                            ? 'bg-[#C96442] border-[#C96442] text-white'
-                            : 'border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963]'
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Độ tin cậy quan sát (1–5)</label>
+                <div className="flex items-center gap-1.5 pt-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setConfidence(n)}
+                      className={`min-h-[38px] min-w-[38px] rounded-lg border text-xs font-mono-num font-semibold transition-colors ${
+                        confidence >= n
+                          ? 'bg-[#C96442] border-[#C96442] text-white'
+                          : 'border-[#E7E5E0] dark:border-[#32302B] text-[#55534D]'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -766,18 +693,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   placeholder="Mô tả giá đã di chuyển như thế nào..."
                   className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                 />
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {QUICK_PRICE_ACTIONS.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setPriceAction(preset)}
-                      className="text-[11px] rounded-md border border-[#E7E5E0] dark:border-[#32302B] px-2 py-1 text-[#6B6963] dark:text-[#A6A39B] hover:border-[#C96442] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9]"
-                    >
-                      + {preset}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               <div>
@@ -790,18 +705,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   placeholder="Hình thái nến xác nhận (râu nến, thân nến, volume)..."
                   className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                 />
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {QUICK_CANDLES.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setCandlePattern(c)}
-                      className="text-[11px] rounded-md border border-[#E7E5E0] dark:border-[#32302B] px-2 py-1 text-[#6B6963] dark:text-[#A6A39B] hover:border-[#C96442] hover:text-[#1C1B18] dark:hover:text-[#F2EFE9]"
-                    >
-                      + {c}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

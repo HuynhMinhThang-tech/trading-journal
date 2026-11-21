@@ -4,7 +4,7 @@ import {
   parseVantagePlainText,
   type GmailPayloadPart,
 } from '../lib/parser/vantageParser.ts';
-import { commitParsedStatement, recordSyncLog } from './store.ts';
+import { commitParsedStatement, getProcessedGmailMessageIds, recordSyncLog } from './store.ts';
 
 // Đồng bộ Gmail hoàn toàn phía máy chủ: dùng Refresh Token dài hạn để tự lấy Access Token,
 // nên không cần đăng nhập / bấm nút trên trình duyệt. Cấu hình bằng biến môi trường:
@@ -41,7 +41,10 @@ export interface GmailSyncResult {
   imported: number;
   partial: number;
   skippedDuplicate: number;
+  /** Email đã được xử lý ở các lần trước nên bị bỏ qua, không tải về lại. */
+  alreadyProcessed: number;
   rejected: number;
+  failed: number;
   previews: GmailSyncPreview[];
   message: string;
 }
@@ -150,8 +153,10 @@ export async function runGmailSync(options: {
   days: number;
   dryRun: boolean;
   trigger: GmailSyncTrigger;
+  /** true = quét lại cả email đã xử lý (vẫn không nhập trùng nhờ kiểm tra ID email + checksum). */
+  rescan?: boolean;
 }): Promise<GmailSyncResult> {
-  const { days, dryRun, trigger } = options;
+  const { days, dryRun, trigger, rescan = false } = options;
   const accessToken = await getAccessToken();
   const headers = { Authorization: `Bearer ${accessToken}` };
 
@@ -176,41 +181,64 @@ export async function runGmailSync(options: {
   const listData = (await listRes.json()) as { messages?: Array<{ id: string; threadId: string }> };
   const messageRefs = listData.messages ?? [];
 
+  const emptyResult = (message: string, alreadyProcessed = 0): GmailSyncResult => ({
+    scanned: messageRefs.length,
+    imported: 0,
+    partial: 0,
+    skippedDuplicate: 0,
+    alreadyProcessed,
+    rejected: 0,
+    failed: 0,
+    previews: [],
+    message,
+  });
+
+  // Lần chạy "không có gì mới" chỉ ghi nhật ký khi do lịch nền hoặc người dùng bấm tay (để còn biết
+  // lần quét gần nhất). Tự động khi mở ứng dụng và quét thử thì không ghi, tránh làm tràn lịch sử.
+  const logNothingNew = async (message: string) => {
+    if (trigger === 'auto' || dryRun) return;
+    await recordSyncLog({
+      source: 'gmail',
+      gmailMessageId: null,
+      sender: SENDER,
+      subject: SUBJECT,
+      emailDateHeader: null,
+      reportTimestampRaw: null,
+      accountNumber: null,
+      ordersCount: 0,
+      dealsCount: 0,
+      status: 'no_new_email',
+      message,
+    });
+  };
+
   if (messageRefs.length === 0) {
-    // Tự động chạy rất thường xuyên nên không ghi log "không có email" để khỏi làm tràn lịch sử.
-    if (trigger !== 'auto') {
-      await recordSyncLog({
-        source: 'gmail',
-        gmailMessageId: null,
-        sender: SENDER,
-        subject: SUBJECT,
-        emailDateHeader: null,
-        reportTimestampRaw: null,
-        accountNumber: null,
-        ordersCount: 0,
-        dealsCount: 0,
-        status: 'no_new_email',
-        message: `Không tìm thấy email Daily Confirmation mới trong ${days} ngày gần nhất.`,
-      });
-    }
-    return {
-      scanned: 0,
-      imported: 0,
-      partial: 0,
-      skippedDuplicate: 0,
-      rejected: 0,
-      previews: [],
-      message: `Không có email Daily Confirmation mới trong ${days} ngày qua.`,
-    };
+    await logNothingNew(`Không tìm thấy email Daily Confirmation mới trong ${days} ngày gần nhất.`);
+    return emptyResult(`Không có email Daily Confirmation mới trong ${days} ngày qua.`);
+  }
+
+  // Chỉ tải về và phân tích những email CHƯA từng xử lý. Việc này chỉ tốn 1 truy vấn nhẹ vào database
+  // thay vì tải đầy đủ + phân tích lại tất cả email trong khoảng ngày mỗi lần đồng bộ.
+  const processedIds = rescan
+    ? new Set<string>()
+    : await getProcessedGmailMessageIds(messageRefs.map((ref) => ref.id));
+  const freshRefs = messageRefs.filter((ref) => !processedIds.has(ref.id));
+  const alreadyProcessed = messageRefs.length - freshRefs.length;
+
+  if (freshRefs.length === 0) {
+    const message = `Không có email mới: ${alreadyProcessed} email trong ${days} ngày qua đã được xử lý trước đó.`;
+    await logNothingNew(message);
+    return emptyResult(message, alreadyProcessed);
   }
 
   let imported = 0;
   let partial = 0;
   let skippedDuplicate = 0;
   let rejected = 0;
+  let failed = 0;
   const previews: GmailSyncPreview[] = [];
 
-  for (const ref of messageRefs) {
+  for (const ref of freshRefs) {
     const msgRes = await fetchWithRetry(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${ref.id}?format=full`,
       headers,
@@ -235,19 +263,21 @@ export async function runGmailSync(options: {
       !subjectHdr.toLowerCase().includes('daily confirmation')
     ) {
       rejected++;
-      await recordSyncLog({
-        source: 'gmail',
-        gmailMessageId: msgData.id,
-        sender: fromHdr,
-        subject: subjectHdr,
-        emailDateHeader: dateHdr,
-        reportTimestampRaw: null,
-        accountNumber: null,
-        ordersCount: 0,
-        dealsCount: 0,
-        status: 'rejected',
-        message: 'Bỏ qua thư vì người gửi hoặc tiêu đề không khớp mẫu Daily Confirmation.',
-      });
+      if (!dryRun) {
+        await recordSyncLog({
+          source: 'gmail',
+          gmailMessageId: msgData.id,
+          sender: fromHdr,
+          subject: subjectHdr,
+          emailDateHeader: dateHdr,
+          reportTimestampRaw: null,
+          accountNumber: null,
+          ordersCount: 0,
+          dealsCount: 0,
+          status: 'rejected',
+          message: 'Bỏ qua thư vì người gửi hoặc tiêu đề không khớp mẫu Daily Confirmation.',
+        });
+      }
       continue;
     }
 
@@ -260,6 +290,21 @@ export async function runGmailSync(options: {
 
     if (!statement) {
       rejected++;
+      if (!dryRun) {
+        await recordSyncLog({
+          source: 'gmail',
+          gmailMessageId: msgData.id,
+          sender: fromHdr,
+          subject: subjectHdr,
+          emailDateHeader: dateHdr,
+          reportTimestampRaw: null,
+          accountNumber: null,
+          ordersCount: 0,
+          dealsCount: 0,
+          status: 'rejected',
+          message: 'Email không có nội dung HTML hoặc văn bản để phân tích.',
+        });
+      }
       continue;
     }
 
@@ -277,13 +322,41 @@ export async function runGmailSync(options: {
       continue;
     }
 
-    const outcome = await commitParsedStatement(statement, {
-      source: 'gmail',
-      gmailMessageId: msgData.id,
-      sender: fromHdr,
-      subject: subjectHdr,
-      emailDateHeader: dateHdr,
-    });
+    let outcome: Awaited<ReturnType<typeof commitParsedStatement>>;
+    try {
+      outcome = await commitParsedStatement(statement, {
+        source: 'gmail',
+        gmailMessageId: msgData.id,
+        sender: fromHdr,
+        subject: subjectHdr,
+        emailDateHeader: dateHdr,
+      });
+    } catch (err) {
+      // Hai lần đồng bộ chạy song song (ví dụ lịch nền + mở ứng dụng) có thể cùng nhập một email:
+      // lần đến sau vi phạm chỉ mục duy nhất. Coi là trùng thay vì làm hỏng cả đợt đồng bộ.
+      const code = (err as { code?: string; cause?: { code?: string } })?.code
+        ?? (err as { cause?: { code?: string } })?.cause?.code;
+      if (code === '23505') {
+        skippedDuplicate++;
+        continue;
+      }
+      console.error('Gmail import error:', err);
+      failed++;
+      await recordSyncLog({
+        source: 'gmail',
+        gmailMessageId: msgData.id,
+        sender: fromHdr,
+        subject: subjectHdr,
+        emailDateHeader: dateHdr,
+        reportTimestampRaw: statement.header.reportTimestampRaw || null,
+        accountNumber: statement.header.accountNumber || null,
+        ordersCount: statement.orders.length,
+        dealsCount: statement.deals.length,
+        status: 'failed',
+        message: 'Lỗi khi lưu báo cáo vào cơ sở dữ liệu; sẽ thử lại ở lần đồng bộ sau.',
+      });
+      continue;
+    }
 
     if (outcome.status === 'imported') imported++;
     else if (outcome.status === 'partial') partial++;
@@ -302,15 +375,18 @@ export async function runGmailSync(options: {
     });
   }
 
+  const skippedNote = alreadyProcessed > 0 ? `; bỏ qua ${alreadyProcessed} email đã xử lý trước đó` : '';
   return {
     scanned: messageRefs.length,
     imported,
     partial,
     skippedDuplicate,
+    alreadyProcessed,
     rejected,
+    failed,
     previews,
     message: dryRun
-      ? `Đã quét thử ${messageRefs.length} email (Dry-run).`
-      : `Đồng bộ xong ${messageRefs.length} email: ${imported} mới, ${partial} có cảnh báo, ${skippedDuplicate} đã có sẵn.`,
+      ? `Đã quét thử ${freshRefs.length} email chưa xử lý${skippedNote} (Dry-run).`
+      : `Đồng bộ xong ${freshRefs.length} email mới: ${imported} nhập mới, ${partial} có cảnh báo, ${skippedDuplicate} trùng báo cáo đã có${skippedNote}.`,
   };
 }

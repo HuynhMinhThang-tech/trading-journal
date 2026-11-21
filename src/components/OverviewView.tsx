@@ -3,13 +3,15 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
 import {
-  ArrowRight,
   ArrowUpRight,
   CircleDollarSign,
   Mail,
@@ -135,15 +137,6 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
-  const uniqueHabitCount = useMemo(() => {
-    const tags = new Set(
-      dataset.observations
-        .map((o) => o.habitTag.trim().toLowerCase())
-        .filter(Boolean),
-    );
-    return tags.size;
-  }, [dataset.observations]);
-
   const maxAbsSymbolPL = useMemo(() => {
     if (metrics.bySymbol.length === 0) return 1;
     return Math.max(...metrics.bySymbol.map((s) => Math.abs(Number(s.netPL))), 1);
@@ -181,6 +174,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     }
     return { net: Math.round(net * 100) / 100, days };
   }, [dayStats, calYear, calMonth]);
+
+  // Số lần Lãi / Lỗ / Hòa vốn cho biểu đồ tròn (cùng bộ lọc với các thẻ KPI)
+  const outcomeRows = [
+    { name: 'Lãi', value: metrics.winningTrades, color: colors.win },
+    { name: 'Lỗ', value: metrics.losingTrades, color: colors.loss },
+    { name: 'Hòa vốn', value: metrics.breakevenTrades, color: colors.flat },
+  ];
+  const outcomeChartData = outcomeRows.filter((r) => r.value > 0);
 
   if (dataset.imports.length === 0) {
     return (
@@ -244,15 +245,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* KPI 1: Số dư hiện tại */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
               Số dư hiện tại
             </span>
-            <Wallet className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+            <Wallet className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {currentBalance ? formatUsd(currentBalance.value, false) : '—'}
           </p>
-          <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             {currentBalance ? `Sao kê ${formatIsoDisplay(currentBalance.date)}` : 'Chưa có sao kê'}
           </p>
         </div>
@@ -260,10 +261,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* KPI 2: Lãi / lỗ ròng đã chốt */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
               Lãi / lỗ ròng đã chốt
             </span>
-            <CircleDollarSign className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+            <CircleDollarSign className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p
             className={`mt-2.5 text-2xl font-semibold font-mono-num tracking-tight ${
@@ -272,7 +273,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           >
             {formatUsd(metrics.netPL)}
           </p>
-          <p className="mt-1.5 text-xs text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1.5 text-xs text-[#55534D] dark:text-[#C2BFB6]">
             <span className="font-mono-num">{metrics.closedTrades}</span> giao dịch hoàn tất
           </p>
         </div>
@@ -280,15 +281,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* KPI 3: Số giao dịch đã đóng */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
               Số giao dịch đã đóng
             </span>
-            <ArrowUpRight className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+            <ArrowUpRight className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {closedPadded}
           </p>
-          <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             {metrics.winningTrades} thắng · {metrics.losingTrades} thua
             {metrics.breakevenTrades > 0 ? ` · ${metrics.breakevenTrades} hòa` : ''}
           </p>
@@ -297,15 +298,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* KPI 4: Tỷ lệ thắng */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
               Tỷ lệ thắng
             </span>
-            <Target className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+            <Target className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : '—'}
           </p>
-          <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             {metrics.winningTrades}/{metrics.closedTrades} lệnh thắng
           </p>
         </div>
@@ -313,10 +314,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* KPI 5: Hệ số lợi nhuận */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
               Hệ số lợi nhuận
             </span>
-            <Scale className="w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] shrink-0" />
+            <Scale className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {metrics.profitFactorInfinite
@@ -326,7 +327,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 : '—'}
           </p>
           {!metrics.profitFactorInfinite && metrics.expectancy !== null && (
-            <p className="mt-1.5 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
               Kỳ vọng {formatUsd(metrics.expectancy)} / lệnh
             </p>
           )}
@@ -340,7 +341,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
               Diễn biến số dư tài khoản
             </h3>
-            <span className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+            <span className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
               {BALANCE_WINDOW_DAYS} ngày gần nhất
             </span>
           </div>
@@ -399,7 +400,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-xs text-[#6B6963] dark:text-[#A6A39B]">
+              <div className="h-full flex items-center justify-center text-xs text-[#55534D] dark:text-[#C2BFB6]">
                 Chưa có số dư trong {BALANCE_WINDOW_DAYS} ngày gần nhất.
               </div>
             )}
@@ -433,51 +434,89 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                         style={{ width: `${widthPct}%` }}
                       />
                     </div>
-                    <p className="text-[11px] font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                    <p className="text-[11px] font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                       {item.trades} giao dịch · Win {item.winRate}%
                     </p>
                   </div>
                 );
               })}
               {metrics.bySymbol.length === 0 && (
-                <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] py-2">
+                <p className="text-xs text-[#55534D] dark:text-[#C2BFB6] py-2">
                   Chưa có giao dịch đã đóng.
                 </p>
               )}
             </div>
           </div>
 
-          {/* Nghiên cứu hành vi giá */}
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                Nghiên cứu hành vi giá
-              </h3>
+          {/* Tỷ lệ Lãi / Lỗ / Hòa vốn */}
+          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+            <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+              Số lần Lãi / Lỗ / Hòa vốn
+            </h3>
 
-              <dl className="mt-4 space-y-2.5 text-xs">
-                <div className="flex items-center justify-between py-1 border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70">
-                  <dt className="text-[#6B6963] dark:text-[#A6A39B]">Số mẫu quan sát</dt>
-                  <dd className="font-mono-num font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                    {dataset.observations.length}
-                  </dd>
+            {metrics.closedTrades > 0 ? (
+              <>
+                <div className="relative mt-3 h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={outcomeChartData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={52}
+                        outerRadius={74}
+                        paddingAngle={outcomeChartData.length > 1 ? 3 : 0}
+                        stroke="none"
+                      >
+                        {outcomeChartData.map((row) => (
+                          <Cell key={row.name} fill={row.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: colors.tooltipBg,
+                          border: `1px solid ${colors.tooltipBorder}`,
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: '#F2EFE9',
+                        }}
+                        itemStyle={{ color: '#F2EFE9' }}
+                        formatter={(val: unknown, name: unknown) => [`${val} lệnh`, String(name)]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-2xl font-bold font-mono-num leading-none text-[#1C1B18] dark:text-[#F2EFE9]">
+                      {metrics.closedTrades}
+                    </span>
+                    <span className="mt-1 text-[11px] text-[#55534D] dark:text-[#C2BFB6]">lệnh đã đóng</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1">
-                  <dt className="text-[#6B6963] dark:text-[#A6A39B]">Tổ hợp hành vi lặp lại</dt>
-                  <dd className="font-mono-num font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                    {uniqueHabitCount}
-                  </dd>
-                </div>
-              </dl>
-            </div>
 
-            <button
-              type="button"
-              onClick={() => onNavigate('research')}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1C1B18] dark:bg-[#F2EFE9] text-white dark:text-[#1C1B18] px-4 py-2.5 text-xs font-medium hover:opacity-90 transition-opacity min-h-[40px] w-full sm:w-auto self-start whitespace-nowrap"
-            >
-              <span>Mở sổ nghiên cứu giá</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+                <ul className="mt-3 space-y-2 text-xs">
+                  {outcomeRows.map((row) => (
+                    <li key={row.name} className="flex items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: row.color }}
+                        aria-hidden="true"
+                      />
+                      <span className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">{row.name}</span>
+                      <span className="ml-auto w-10 text-right font-mono-num font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+                        {row.value}
+                      </span>
+                      <span className="w-14 text-right font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+                        {((row.value / metrics.closedTrades) * 100).toFixed(1)}%
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="py-8 text-center text-xs text-[#55534D] dark:text-[#C2BFB6]">
+                Chưa có giao dịch đã đóng.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -496,7 +535,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           }}
           summary={
             <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-[#6B6963] dark:text-[#A6A39B]">
+              <span className="text-[#55534D] dark:text-[#C2BFB6]">
                 {monthSummary.days} ngày giao dịch
               </span>
               <span className={`font-semibold ${pnlTextClass(monthSummary.net)}`}>
@@ -526,7 +565,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   </span>
                   <span className="hidden sm:inline">{formatCompactMoney(stat.net)}</span>
                 </span>
-                <span className="hidden sm:block text-[10px] text-[#6B6963] dark:text-[#A6A39B]">
+                <span className="hidden sm:block text-[10px] text-[#55534D] dark:text-[#C2BFB6]">
                   {stat.count} lệnh
                 </span>
               </>

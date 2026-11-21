@@ -5,8 +5,8 @@
 // Giá trị CSS tương ứng nằm trong src/index.css (--pnl-win / --pnl-loss).
 
 export const PNL_HEX = {
-  light: { win: '#15803D', loss: '#B91C1C', axis: '#6B6963', tooltipBg: '#1C1B18', tooltipBorder: '#32302B' },
-  dark: { win: '#34E3A0', loss: '#FF7A85', axis: '#A6A39B', tooltipBg: '#2A2925', tooltipBorder: '#4A4740' },
+  light: { win: '#15803D', loss: '#B91C1C', flat: '#8A877E', axis: '#55534D', tooltipBg: '#1C1B18', tooltipBorder: '#32302B' },
+  dark: { win: '#34E3A0', loss: '#FF7A85', flat: '#9C998F', axis: '#C2BFB6', tooltipBg: '#2A2925', tooltipBorder: '#4A4740' },
 } as const;
 
 export function chartColors(isDark: boolean) {

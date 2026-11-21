@@ -94,7 +94,7 @@ export const MonthCalendar: React.FC<MonthCalendarProps> = ({
         {WEEKDAY_LABELS.map((w) => (
           <div
             key={w}
-            className="text-center text-[11px] font-medium text-[#6B6963] dark:text-[#A6A39B] py-1"
+            className="text-center text-[11px] font-medium text-[#55534D] dark:text-[#C2BFB6] py-1"
           >
             {w}
           </div>
@@ -107,7 +107,7 @@ export const MonthCalendar: React.FC<MonthCalendarProps> = ({
             return (
               <div
                 key={cell.iso}
-                className="min-h-[58px] sm:min-h-[84px] rounded-lg p-1.5 text-[11px] text-[#6B6963]/40 dark:text-[#A6A39B]/35"
+                className="min-h-[58px] sm:min-h-[84px] rounded-lg p-1.5 text-[11px] text-[#55534D]/40 dark:text-[#C2BFB6]/35"
               >
                 {cell.day}
               </div>
@@ -130,7 +130,7 @@ export const MonthCalendar: React.FC<MonthCalendarProps> = ({
                 className={`text-[11px] leading-none ${
                   isToday
                     ? 'font-bold text-[#C96442] dark:text-[#D97757]'
-                    : 'font-medium text-[#6B6963] dark:text-[#A6A39B]'
+                    : 'font-medium text-[#55534D] dark:text-[#C2BFB6]'
                 }`}
               >
                 {cell.day}

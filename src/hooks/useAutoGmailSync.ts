@@ -1,9 +1,12 @@
 import { useEffect } from 'react';
 
-const SESSION_KEY = 'tj_auto_gmail_sync_done';
+// Mở lại ứng dụng (đặc biệt là PWA trên điện thoại) luôn tạo phiên mới, nên không thể chỉ dựa vào
+// sessionStorage để tránh quét liên tục. Lưu thời điểm lần quét gần nhất và giãn cách tối thiểu.
+const LAST_RUN_KEY = 'tj_auto_gmail_sync_at';
+const MIN_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
- * Tự động quét Gmail một lần mỗi phiên mở ứng dụng (bổ sung cho lịch chạy nền trên máy chủ).
+ * Tự động quét Gmail khi mở ứng dụng, tối đa 1 lần mỗi 15 phút (bổ sung cho lịch chạy nền trên máy chủ).
  * Im lặng hoàn toàn: nếu máy chủ chưa cấu hình Gmail hoặc có lỗi thì bỏ qua.
  * Chỉ tải lại dữ liệu khi thật sự có báo cáo mới.
  */
@@ -11,8 +14,9 @@ export function useAutoGmailSync(onImported: () => void | Promise<void>) {
   useEffect(() => {
     (async () => {
       try {
-        if (window.sessionStorage.getItem(SESSION_KEY) === '1') return;
-        window.sessionStorage.setItem(SESSION_KEY, '1');
+        const lastRun = Number(window.localStorage.getItem(LAST_RUN_KEY) ?? '0');
+        if (Number.isFinite(lastRun) && Date.now() - lastRun < MIN_INTERVAL_MS) return;
+        window.localStorage.setItem(LAST_RUN_KEY, String(Date.now()));
 
         const res = await fetch('/api/gmail/sync', {
           method: 'POST',

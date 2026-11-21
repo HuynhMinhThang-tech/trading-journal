@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, Search, X } from 'lucide-react';
+import { Pagination } from './Pagination.tsx';
+import { usePagination } from '../hooks/usePagination.ts';
 import { formatIsoDisplay, isoFromRaw } from '../lib/dateUtils.ts';
 import {
   formatDateTimeDisplay,
@@ -8,7 +10,7 @@ import {
   formatUsd,
 } from '../lib/format.ts';
 import { pnlTextClass } from '../lib/pnl.ts';
-import type { JournalEntry, RuleAdherence, TradeRecord } from '../shared/types.ts';
+import type { JournalEntry, TradeRecord } from '../shared/types.ts';
 
 interface DiaryViewProps {
   trades: TradeRecord[];
@@ -21,26 +23,52 @@ interface DiaryViewProps {
   ) => Promise<void>;
 }
 
-const ADHERENCE_LABELS: Record<RuleAdherence, string> = {
-  tuan_thu: 'Tuân thủ kế hoạch',
-  vi_pham_nhe: 'Vi phạm nhẹ',
-  vi_pham: 'Vi phạm kỷ luật',
-};
+const PAGE_SIZE = 10;
 
 const SELECT_CLASS =
   'rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-xs font-medium min-h-[38px]';
 
 const FIELD_CLASS =
-  'w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-2 text-sm';
+  'w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-2 text-sm leading-relaxed focus:outline-none focus:border-[#C96442]';
+
+// Ba ô mô tả tự do + một ô ghi chú thêm. Các trường cũ của nhật ký (chiến lược, thẻ lỗi, SL/TP kế hoạch...)
+// vẫn được giữ nguyên trong cơ sở dữ liệu, không bị xóa khi lưu.
+const NOTE_FIELDS = [
+  {
+    key: 'thesis',
+    label: 'Lý do vào lệnh',
+    placeholder: 'Vì sao bạn vào lệnh này? Tín hiệu, vùng giá, kế hoạch ban đầu...',
+  },
+  {
+    key: 'marketCondition',
+    label: 'Bối cảnh thị trường & nến',
+    placeholder: 'Xu hướng, tin tức, nến xác nhận trông như thế nào...',
+  },
+  {
+    key: 'exitReason',
+    label: 'Vì sao cắt sớm / chốt non / thoát lệnh',
+    placeholder: 'Cắt lỗ sớm, chốt non, giữ quá lâu hay đúng kế hoạch? Điều gì khiến bạn thoát lệnh?',
+  },
+  {
+    key: 'lessonLearned',
+    label: 'Ghi chú thêm / Bài học',
+    placeholder: 'Lần sau bạn sẽ làm khác đi điều gì?',
+  },
+] as const;
+
+type NoteKey = (typeof NOTE_FIELDS)[number]['key'];
+type NoteDraft = Record<NoteKey, string>;
+
+const EMPTY_DRAFT: NoteDraft = { thesis: '', marketCondition: '', exitReason: '', lessonLearned: '' };
 
 function tradeDay(t: TradeRecord): string {
   return isoFromRaw(t.closeTimeRaw ?? t.openTimeRaw);
 }
 
 function hasNote(t: TradeRecord): boolean {
+  const j = t.journal;
   return Boolean(
-    t.journal &&
-      (t.journal.strategy || t.journal.thesis || t.journal.lessonLearned || t.journal.exitReason),
+    j && (j.thesis || j.marketCondition || j.exitReason || j.lessonLearned || j.strategy),
   );
 }
 
@@ -51,26 +79,12 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   onSaveJournal,
 }) => {
   const [noteFilter, setNoteFilter] = useState<'all' | 'documented' | 'missing'>('all');
-  const [adherenceFilter, setAdherenceFilter] = useState<'ALL' | RuleAdherence>('ALL');
   const [sideFilter, setSideFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const [strategy, setStrategy] = useState('');
-  const [marketCondition, setMarketCondition] = useState('');
-  const [thesis, setThesis] = useState('');
-  const [plannedEntry, setPlannedEntry] = useState('');
-  const [plannedSL, setPlannedSL] = useState('');
-  const [plannedTP, setPlannedTP] = useState('');
-  const [exitReason, setExitReason] = useState('');
-  const [emotionBefore, setEmotionBefore] = useState('');
-  const [emotionDuring, setEmotionDuring] = useState('');
-  const [emotionAfter, setEmotionAfter] = useState('');
-  const [ruleAdherence, setRuleAdherence] = useState<RuleAdherence>('tuan_thu');
-  const [mistakeTagsText, setMistakeTagsText] = useState('');
-  const [lessonLearned, setLessonLearned] = useState('');
+  const [draft, setDraft] = useState<NoteDraft>(EMPTY_DRAFT);
 
   const sortedTrades = useMemo(() => {
     return [...trades].sort((a, b) =>
@@ -85,31 +99,44 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
       const noted = hasNote(t);
       if (noteFilter === 'documented' && !noted) return false;
       if (noteFilter === 'missing' && noted) return false;
-      if (adherenceFilter !== 'ALL' && t.journal?.ruleAdherence !== adherenceFilter) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const hay = `${t.symbol} ${t.openTimeRaw} ${t.closeTimeRaw ?? ''} ${t.journal?.strategy ?? ''} ${t.journal?.thesis ?? ''} ${t.journal?.lessonLearned ?? ''} ${(t.journal?.mistakeTags ?? []).join(' ')}`.toLowerCase();
+        const j = t.journal;
+        const hay = `${t.symbol} ${t.openTimeRaw} ${t.closeTimeRaw ?? ''} ${j?.strategy ?? ''} ${j?.thesis ?? ''} ${j?.marketCondition ?? ''} ${j?.exitReason ?? ''} ${j?.lessonLearned ?? ''} ${(j?.mistakeTags ?? []).join(' ')}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [sortedTrades, focusDay, sideFilter, noteFilter, adherenceFilter, search]);
+  }, [sortedTrades, focusDay, sideFilter, noteFilter, search]);
 
-  // Nhóm theo ngày để dễ đối chiếu với lịch ở Tổng quan
-  const dayGroups = useMemo(() => {
-    const groups: Array<{ day: string; trades: TradeRecord[]; net: number }> = [];
+  const pagination = usePagination(filtered, PAGE_SIZE, `${focusDay ?? ''}|${sideFilter}|${noteFilter}|${search}`);
+
+  // Tổng theo ngày tính trên toàn bộ kết quả lọc (không phải riêng trang đang xem),
+  // để dòng tiêu đề ngày luôn khớp với lịch ở Tổng quan dù ngày đó bị chia qua nhiều trang.
+  const dayTotals = useMemo(() => {
+    const map = new Map<string, { count: number; net: number }>();
     for (const t of filtered) {
       const day = tradeDay(t);
-      const last = groups[groups.length - 1];
-      if (last && last.day === day) {
-        last.trades.push(t);
-        last.net += Number(t.netPL) || 0;
-      } else {
-        groups.push({ day, trades: [t], net: Number(t.netPL) || 0 });
-      }
+      const entry = map.get(day) ?? { count: 0, net: 0 };
+      entry.count += 1;
+      entry.net += Number(t.netPL) || 0;
+      map.set(day, entry);
     }
-    return groups.map((g) => ({ ...g, net: Math.round(g.net * 100) / 100 }));
+    for (const entry of map.values()) entry.net = Math.round(entry.net * 100) / 100;
+    return map;
   }, [filtered]);
+
+  // Nhóm các lệnh của trang hiện tại theo ngày
+  const dayGroups = useMemo(() => {
+    const groups: Array<{ day: string; trades: TradeRecord[] }> = [];
+    for (const t of pagination.pageItems) {
+      const day = tradeDay(t);
+      const last = groups[groups.length - 1];
+      if (last && last.day === day) last.trades.push(t);
+      else groups.push({ day, trades: [t] });
+    }
+    return groups;
+  }, [pagination.pageItems]);
 
   // Khi mở từ lịch: tự bung chi tiết các lệnh của ngày đó
   const appliedFocus = useRef<string | null>(null);
@@ -135,43 +162,35 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   const startEditing = (trade: TradeRecord) => {
     setEditingTradeId(trade.id);
     const j = trade.journal;
-    setStrategy(j?.strategy ?? '');
-    setMarketCondition(j?.marketCondition ?? '');
-    setThesis(j?.thesis ?? '');
-    setPlannedEntry(j?.plannedEntry ?? '');
-    setPlannedSL(j?.plannedSL ?? '');
-    setPlannedTP(j?.plannedTP ?? '');
-    setExitReason(j?.exitReason ?? '');
-    setEmotionBefore(j?.emotionBefore ?? '');
-    setEmotionDuring(j?.emotionDuring ?? '');
-    setEmotionAfter(j?.emotionAfter ?? '');
-    setRuleAdherence(j?.ruleAdherence ?? 'tuan_thu');
-    setMistakeTagsText((j?.mistakeTags ?? []).join(', '));
-    setLessonLearned(j?.lessonLearned ?? '');
+    setDraft({
+      thesis: j?.thesis ?? '',
+      marketCondition: j?.marketCondition ?? '',
+      exitReason: j?.exitReason ?? '',
+      lessonLearned: j?.lessonLearned ?? '',
+    });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTradeId) return;
+    // Giữ nguyên các trường cũ (nếu có) để việc sửa ghi chú không làm mất dữ liệu đã lưu trước đây.
+    const prev = trades.find((t) => t.id === editingTradeId)?.journal ?? null;
     setSaving(true);
     try {
       await onSaveJournal(editingTradeId, {
-        strategy,
-        marketCondition,
-        thesis,
-        plannedEntry,
-        plannedSL,
-        plannedTP,
-        exitReason,
-        emotionBefore,
-        emotionDuring,
-        emotionAfter,
-        ruleAdherence,
-        mistakeTags: mistakeTagsText
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean),
-        lessonLearned,
+        strategy: prev?.strategy ?? '',
+        marketCondition: draft.marketCondition.trim(),
+        thesis: draft.thesis.trim(),
+        plannedEntry: prev?.plannedEntry ?? '',
+        plannedSL: prev?.plannedSL ?? '',
+        plannedTP: prev?.plannedTP ?? '',
+        exitReason: draft.exitReason.trim(),
+        emotionBefore: prev?.emotionBefore ?? '',
+        emotionDuring: prev?.emotionDuring ?? '',
+        emotionAfter: prev?.emotionAfter ?? '',
+        ruleAdherence: prev?.ruleAdherence ?? 'tuan_thu',
+        mistakeTags: prev?.mistakeTags ?? [],
+        lessonLearned: draft.lessonLearned.trim(),
       });
       setEditingTradeId(null);
     } finally {
@@ -185,13 +204,15 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
     const isEditing = editingTradeId === t.id;
     const j = t.journal;
     const feeSwap = (Number(t.commission) || 0) + (Number(t.swap) || 0);
+    const legacy: string[] = [];
+    if (j?.strategy) legacy.push(`Chiến lược: ${j.strategy}`);
+    if (j && j.mistakeTags.length > 0) legacy.push(`Thẻ lỗi: ${j.mistakeTags.join(' · ')}`);
 
     return (
       <div className="px-4 py-4 bg-[#FAF9F5] dark:bg-[#181715]/60 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-            {t.openTimeRaw} → {t.closeTimeRaw ?? 'Chưa có giờ đóng'} · Phí/Swap:{' '}
-            {formatUsd(feeSwap)}
+          <p className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+            {t.openTimeRaw} → {t.closeTimeRaw ?? 'Chưa có giờ đóng'} · Phí/Swap: {formatUsd(feeSwap)}
           </p>
           {!isEditing && (
             <button
@@ -200,150 +221,25 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-1.5 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[36px] whitespace-nowrap"
             >
               <BookOpen className="w-3.5 h-3.5 text-[#C96442]" />
-              <span>{j ? 'Chỉnh sửa nhật ký' : 'Viết nhật ký'}</span>
+              <span>{hasNote(t) ? 'Chỉnh sửa ghi chú' : 'Viết ghi chú'}</span>
             </button>
           )}
         </div>
 
         {isEditing ? (
           <form onSubmit={handleSave} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">Chiến lược / Setup</label>
-                <input
-                  type="text"
-                  value={strategy}
-                  onChange={(e) => setStrategy(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Điều kiện thị trường</label>
-                <input
-                  type="text"
-                  value={marketCondition}
-                  onChange={(e) => setMarketCondition(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">Entry dự kiến</label>
-                <input
-                  type="text"
-                  value={plannedEntry}
-                  onChange={(e) => setPlannedEntry(e.target.value)}
-                  className={`${FIELD_CLASS} font-mono-num`}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">SL kế hoạch</label>
-                <input
-                  type="text"
-                  value={plannedSL}
-                  onChange={(e) => setPlannedSL(e.target.value)}
-                  className={`${FIELD_CLASS} font-mono-num`}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">TP kế hoạch</label>
-                <input
-                  type="text"
-                  value={plannedTP}
-                  onChange={(e) => setPlannedTP(e.target.value)}
-                  className={`${FIELD_CLASS} font-mono-num`}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">Lý do vào lệnh (Thesis)</label>
+            {NOTE_FIELDS.map((f) => (
+              <div key={f.key}>
+                <label className="block text-xs font-semibold mb-1">{f.label}</label>
                 <textarea
-                  rows={2}
-                  value={thesis}
-                  onChange={(e) => setThesis(e.target.value)}
+                  rows={3}
+                  value={draft[f.key]}
+                  onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                  placeholder={f.placeholder}
                   className={FIELD_CLASS}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Lý do thoát lệnh</label>
-                <textarea
-                  rows={2}
-                  value={exitReason}
-                  onChange={(e) => setExitReason(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">Cảm xúc trước lệnh</label>
-                <input
-                  type="text"
-                  value={emotionBefore}
-                  onChange={(e) => setEmotionBefore(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Cảm xúc trong lệnh</label>
-                <input
-                  type="text"
-                  value={emotionDuring}
-                  onChange={(e) => setEmotionDuring(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Cảm xúc sau lệnh</label>
-                <input
-                  type="text"
-                  value={emotionAfter}
-                  onChange={(e) => setEmotionAfter(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">Tuân thủ kế hoạch</label>
-                <select
-                  value={ruleAdherence}
-                  onChange={(e) => setRuleAdherence(e.target.value as RuleAdherence)}
-                  className={FIELD_CLASS}
-                >
-                  {(Object.keys(ADHERENCE_LABELS) as RuleAdherence[]).map((k) => (
-                    <option key={k} value={k}>
-                      {ADHERENCE_LABELS[k]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Thẻ lỗi sai (cách bằng dấu phẩy)</label>
-                <input
-                  type="text"
-                  value={mistakeTagsText}
-                  onChange={(e) => setMistakeTagsText(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Bài học rút ra</label>
-              <textarea
-                rows={2}
-                value={lessonLearned}
-                onChange={(e) => setLessonLearned(e.target.value)}
-                className={FIELD_CLASS}
-              />
-            </div>
+            ))}
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -358,53 +254,26 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                 disabled={saving}
                 className="rounded-lg bg-[#C96442] px-4 py-2 text-xs font-medium text-white hover:bg-[#B55535] disabled:opacity-50 min-h-[38px]"
               >
-                {saving ? 'Đang lưu...' : 'Lưu nhật ký'}
+                {saving ? 'Đang lưu...' : 'Lưu ghi chú'}
               </button>
             </div>
           </form>
-        ) : j ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="space-y-1">
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Chiến lược:</span>{' '}
-                <strong>{j.strategy || '—'}</strong>
+        ) : hasNote(t) ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+            {NOTE_FIELDS.map((f) => (
+              <div key={f.key}>
+                <p className="text-xs font-semibold text-[#55534D] dark:text-[#C2BFB6]">{f.label}</p>
+                <p className="mt-1 whitespace-pre-wrap leading-relaxed">{j?.[f.key] || '—'}</p>
+              </div>
+            ))}
+            {legacy.length > 0 && (
+              <p className="md:col-span-2 text-xs text-[#55534D] dark:text-[#C2BFB6]">
+                {legacy.join(' · ')}
               </p>
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Bối cảnh:</span>{' '}
-                {j.marketCondition || '—'}
-              </p>
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Tuân thủ:</span>{' '}
-                {ADHERENCE_LABELS[j.ruleAdherence]}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Lý do vào:</span>{' '}
-                {j.thesis || '—'}
-              </p>
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Lý do ra:</span>{' '}
-                {j.exitReason || '—'}
-              </p>
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Tâm lý:</span>{' '}
-                {[j.emotionBefore, j.emotionDuring, j.emotionAfter].filter(Boolean).join(' → ') || '—'}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Thẻ lỗi:</span>{' '}
-                {j.mistakeTags.length > 0 ? j.mistakeTags.join(' · ') : 'Không có'}
-              </p>
-              <p>
-                <span className="text-[#6B6963] dark:text-[#A6A39B]">Bài học:</span>{' '}
-                {j.lessonLearned || '—'}
-              </p>
-            </div>
+            )}
           </div>
         ) : (
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Chưa có nhật ký cho lệnh này.</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Chưa có ghi chú cho lệnh này.</p>
         )}
       </div>
     );
@@ -414,7 +283,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
     <div className="space-y-5">
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h2 className="text-base font-semibold">Nhật ký giao dịch</h2>
-        <div className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B] shrink-0">
+        <div className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6] shrink-0">
           Đã ghi nhật ký:{' '}
           <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">
             {documentedCount}/{trades.length}
@@ -429,12 +298,12 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
         className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4"
       >
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-[#6B6963] absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#55534D] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Tìm theo mã, chiến lược, lý do vào lệnh, bài học..."
+            placeholder="Tìm theo mã, lý do vào lệnh, bối cảnh, bài học..."
             className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#C96442]"
           />
         </div>
@@ -473,144 +342,145 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
             <option value="documented">Đã ghi</option>
             <option value="missing">Chưa ghi</option>
           </select>
-
-          <select
-            value={adherenceFilter}
-            onChange={(e) => setAdherenceFilter(e.target.value as 'ALL' | RuleAdherence)}
-            aria-label="Mức tuân thủ"
-            className={SELECT_CLASS}
-          >
-            <option value="ALL">Mọi mức tuân thủ</option>
-            <option value="tuan_thu">Tuân thủ kế hoạch</option>
-            <option value="vi_pham_nhe">Vi phạm nhẹ</option>
-            <option value="vi_pham">Vi phạm kỷ luật</option>
-          </select>
         </div>
       </div>
 
-      {/* Trades table */}
+      {/* Trades table: cột chữ căn trái, cột số căn phải (tiêu đề và ô cùng hướng), cột trạng thái căn phải */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-xs">
+          <table className="w-full min-w-[860px] table-fixed text-left text-xs">
+            <colgroup>
+              <col />
+              <col className="w-[84px]" />
+              <col className="w-[136px]" />
+              <col className="w-[104px]" />
+              <col className="w-[150px]" />
+              <col className="w-[132px]" />
+              <col className="w-[148px]" />
+            </colgroup>
             <thead>
-              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963] dark:text-[#A6A39B] text-[11px] tracking-wide">
-                <th className="py-2.5 pr-4 font-medium">MÃ GIAO DỊCH</th>
-                <th className="py-2.5 px-3 font-medium">CHIỀU</th>
-                <th className="py-2.5 px-3 font-medium">GIÁ VÀO → RA</th>
-                <th className="py-2.5 px-3 font-medium text-right">KHỐI LƯỢNG</th>
-                <th className="py-2.5 px-3 font-medium">THỜI GIAN GIỮ</th>
-                <th className="py-2.5 px-3 font-medium text-right">LÃI / LỖ RÒNG</th>
-                <th className="py-2.5 pl-3 font-medium text-right">ĐÁNH GIÁ</th>
+              <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6] text-[11px] tracking-wide">
+                <th className="py-2.5 pr-3 font-semibold text-left">MÃ GIAO DỊCH</th>
+                <th className="py-2.5 px-3 font-semibold text-left">CHIỀU</th>
+                <th className="py-2.5 px-3 font-semibold text-right">GIÁ VÀO → RA</th>
+                <th className="py-2.5 px-3 font-semibold text-right">KHỐI LƯỢNG</th>
+                <th className="py-2.5 px-3 font-semibold text-right">THỜI GIAN GIỮ</th>
+                <th className="py-2.5 px-3 font-semibold text-right">LÃI / LỖ RÒNG</th>
+                <th className="py-2.5 pl-3 font-semibold text-right">ĐÁNH GIÁ</th>
               </tr>
             </thead>
             <tbody>
-              {dayGroups.map((group) => (
-                <React.Fragment key={group.day}>
-                  <tr className="bg-[#F3F1EC] dark:bg-[#181715]">
-                    <td colSpan={7} className="py-2 px-3">
-                      <div className="flex items-center justify-between gap-3 text-[11px]">
-                        <span className="font-semibold font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">
+              {dayGroups.map((group) => {
+                const total = dayTotals.get(group.day) ?? { count: group.trades.length, net: 0 };
+                return (
+                  <React.Fragment key={group.day}>
+                    <tr className="bg-[#F3F1EC] dark:bg-[#181715]">
+                      <td colSpan={5} className="py-2 pr-3 pl-3 text-left">
+                        <span className="text-[11px] font-semibold font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">
                           {formatIsoDisplay(group.day)}
-                          <span className="ml-2 font-normal text-[#6B6963] dark:text-[#A6A39B]">
-                            {group.trades.length} lệnh
+                          <span className="ml-2 font-normal text-[#55534D] dark:text-[#C2BFB6]">
+                            {total.count} lệnh
                           </span>
                         </span>
-                        <span className={`font-mono-num font-semibold ${pnlTextClass(group.net)}`}>
-                          {formatUsd(group.net)}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      <td
+                        className={`py-2 px-3 text-right text-[11px] font-mono-num font-semibold ${pnlTextClass(total.net)}`}
+                      >
+                        {formatUsd(total.net)}
+                      </td>
+                      <td />
+                    </tr>
 
-                  {group.trades.map((t) => {
-                    const netNum = Number(t.netPL);
-                    const noted = hasNote(t);
-                    const expanded = expandedIds.has(t.id);
-                    const tickerShort = t.symbol.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase();
-                    return (
-                      <React.Fragment key={t.id}>
-                        <tr
-                          onClick={() => toggleExpanded(t.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              toggleExpanded(t.id);
-                            }
-                          }}
-                          tabIndex={0}
-                          aria-expanded={expanded}
-                          className="border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70 hover:bg-[#FAF9F5] dark:hover:bg-[#181715]/60 cursor-pointer transition-colors focus:outline-none focus-visible:bg-[#FAF9F5] dark:focus-visible:bg-[#181715]/60"
-                        >
-                          <td className="py-3 pr-4">
-                            <div className="flex items-center gap-3">
-                              <span className="h-8 w-8 rounded-lg bg-[#F3F1EC] dark:bg-[#181715] border border-[#E7E5E0] dark:border-[#32302B] flex items-center justify-center font-mono-num text-[11px] font-semibold text-[#6B6963] dark:text-[#A6A39B] shrink-0">
-                                {tickerShort}
-                              </span>
-                              <div>
-                                <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">{t.symbol}</p>
-                                <p className="text-[11px] font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
-                                  {formatDateTimeDisplay(t.openTimeRaw)}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className={`font-semibold ${t.side === 'BUY' ? 'text-win' : 'text-loss'}`}>
-                              {t.side === 'BUY' ? 'MUA' : 'BÁN'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 font-mono-num">
-                            <div className="font-medium text-[#1C1B18] dark:text-[#F2EFE9]">
-                              {formatPrice(t.entryPrice)}
-                            </div>
-                            <div className="text-[11px] text-[#6B6963] dark:text-[#A6A39B]">
-                              {formatPrice(t.exitPrice)}
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono-num font-medium">
-                            {Number(t.volume).toFixed(2)}
-                          </td>
-                          <td className="py-3 px-3 font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">
-                            {formatExactHoldingDuration(t.openTimeRaw, t.closeTimeRaw, t.holdingMinutes)}
-                          </td>
-                          <td
-                            className={`py-3 px-3 text-right font-mono-num font-semibold ${pnlTextClass(netNum)}`}
+                    {group.trades.map((t) => {
+                      const netNum = Number(t.netPL);
+                      const noted = hasNote(t);
+                      const expanded = expandedIds.has(t.id);
+                      const tickerShort = t.symbol.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase();
+                      return (
+                        <React.Fragment key={t.id}>
+                          <tr
+                            onClick={() => toggleExpanded(t.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleExpanded(t.id);
+                              }
+                            }}
+                            tabIndex={0}
+                            aria-expanded={expanded}
+                            className="border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70 hover:bg-[#FAF9F5] dark:hover:bg-[#181715]/60 cursor-pointer transition-colors focus:outline-none focus-visible:bg-[#FAF9F5] dark:focus-visible:bg-[#181715]/60"
                           >
-                            {formatUsd(t.netPL)}
-                          </td>
-                          <td className="py-3 pl-3 text-right">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span
-                                className={`text-[11px] font-medium ${
-                                  noted ? 'text-win' : 'text-amber-700 dark:text-amber-400'
-                                }`}
-                              >
-                                {noted ? 'ĐÃ ĐÁNH GIÁ' : 'CHỜ ĐÁNH GIÁ'}
+                            <td className="py-3 pr-3 pl-3 text-left">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="h-8 w-8 rounded-lg bg-[#F3F1EC] dark:bg-[#181715] border border-[#E7E5E0] dark:border-[#32302B] flex items-center justify-center font-mono-num text-[11px] font-semibold text-[#55534D] dark:text-[#C2BFB6] shrink-0">
+                                  {tickerShort}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9] truncate">{t.symbol}</p>
+                                  <p className="text-[11px] font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+                                    {formatDateTimeDisplay(t.openTimeRaw)}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-left">
+                              <span className={`font-semibold ${t.side === 'BUY' ? 'text-win' : 'text-loss'}`}>
+                                {t.side === 'BUY' ? 'MUA' : 'BÁN'}
                               </span>
-                              <ChevronDown
-                                className={`w-4 h-4 text-[#6B6963] dark:text-[#A6A39B] transition-transform ${
-                                  expanded ? 'rotate-180' : ''
-                                }`}
-                              />
-                            </span>
-                          </td>
-                        </tr>
-                        {expanded && (
-                          <tr className="border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70">
-                            <td colSpan={7} className="p-0">
-                              {renderDetail(t)}
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono-num">
+                              <div className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+                                {formatPrice(t.entryPrice)}
+                              </div>
+                              <div className="text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+                                {formatPrice(t.exitPrice)}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono-num font-semibold">
+                              {Number(t.volume).toFixed(2)}
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">
+                              {formatExactHoldingDuration(t.openTimeRaw, t.closeTimeRaw, t.holdingMinutes)}
+                            </td>
+                            <td
+                              className={`py-3 px-3 text-right font-mono-num font-semibold ${pnlTextClass(netNum)}`}
+                            >
+                              {formatUsd(t.netPL)}
+                            </td>
+                            <td className="py-3 pl-3 text-right">
+                              <span className="inline-flex items-center justify-end gap-1.5">
+                                <span
+                                  className={`text-[11px] font-semibold whitespace-nowrap ${
+                                    noted ? 'text-win' : 'text-amber-700 dark:text-amber-400'
+                                  }`}
+                                >
+                                  {noted ? 'ĐÃ ĐÁNH GIÁ' : 'CHỜ ĐÁNH GIÁ'}
+                                </span>
+                                <ChevronDown
+                                  className={`w-4 h-4 shrink-0 text-[#55534D] dark:text-[#C2BFB6] transition-transform ${
+                                    expanded ? 'rotate-180' : ''
+                                  }`}
+                                />
+                              </span>
                             </td>
                           </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </React.Fragment>
-              ))}
+                          {expanded && (
+                            <tr className="border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70">
+                              <td colSpan={7} className="p-0">
+                                {renderDetail(t)}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-sm text-[#6B6963] dark:text-[#A6A39B]">
+                  <td colSpan={7} className="py-8 text-center text-sm text-[#55534D] dark:text-[#C2BFB6]">
                     Chưa có lệnh giao dịch nào phù hợp với bộ lọc.
                   </td>
                 </tr>
@@ -618,6 +488,15 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          unit="lệnh"
+        />
       </div>
     </div>
   );

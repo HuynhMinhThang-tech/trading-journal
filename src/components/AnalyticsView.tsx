@@ -76,7 +76,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Core Quantitative Grid (Complementary to Overview) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Kỳ vọng toán học (Expectancy)</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Kỳ vọng toán học (Expectancy)</p>
           <p
             className={`mt-1.5 text-xl font-semibold font-mono-num ${
               metrics.expectancy !== null && Number(metrics.expectancy) > 0
@@ -88,18 +88,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           >
             {metrics.expectancy !== null ? `${formatMoney(metrics.expectancy)}/lệnh` : 'Chưa đủ mẫu'}
           </p>
-          <p className="mt-1 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             Lãi gộp +${metrics.grossProfit} · Lỗ gộp -${metrics.grossLoss}
           </p>
         </div>
 
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Lãi TB / Lỗ TB mỗi lệnh</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Lãi TB / Lỗ TB mỗi lệnh</p>
           <p className="mt-1.5 text-xl font-semibold font-mono-num">
             <span className="text-win">
               {metrics.averageWin ? `+$${metrics.averageWin}` : '—'}
             </span>
-            <span className="mx-1.5 text-[#6B6963]">/</span>
+            <span className="mx-1.5 text-[#55534D]">/</span>
             <span className="text-loss">
               {metrics.averageLoss ? `-$${metrics.averageLoss}` : '—'}
             </span>
@@ -107,21 +107,21 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Chuỗi thắng / thua tối đa</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Chuỗi thắng / thua tối đa</p>
           <p className="mt-1.5 text-xl font-semibold font-mono-num">
             {metrics.maxConsecutiveWins} / {metrics.maxConsecutiveLosses}
           </p>
-          <p className="mt-1 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             Giữ TB: Thắng {metrics.avgWinHoldingMinutes ?? '—'}p · Thua {metrics.avgLossHoldingMinutes ?? '—'}p
           </p>
         </div>
 
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B]">Phí & Swap lũy kế</p>
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Phí & Swap lũy kế</p>
           <p className="mt-1.5 text-xl font-semibold font-mono-num">
             {formatMoney(Number(metrics.totalCommission) + Number(metrics.totalSwap))}
           </p>
-          <p className="mt-1 text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+          <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             Comm {metrics.totalCommission} · Swap {metrics.totalSwap}
           </p>
         </div>
@@ -139,7 +139,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <p className="text-xs font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
                   {s.side === 'BUY' ? 'Hiệu suất chiều MUA (Buy)' : 'Hiệu suất chiều BÁN (Sell)'}
                 </p>
-                <p className="text-xs font-mono-num text-[#6B6963] dark:text-[#A6A39B] mt-0.5">
+                <p className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6] mt-0.5">
                   n={s.trades} lệnh · Thắng {s.wins} · Win Rate {s.winRate}%
                 </p>
               </div>
@@ -182,7 +182,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-xs text-[#6B6963]">
+              <div className="h-full flex items-center justify-center text-xs text-[#55534D]">
                 Chưa có dữ liệu lệnh đã đóng.
               </div>
             )}
@@ -211,7 +211,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-xs text-[#6B6963]">
+              <div className="h-full flex items-center justify-center text-xs text-[#55534D]">
                 Chưa có dữ liệu phân bố.
               </div>
             )}
@@ -239,7 +239,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963] dark:text-[#A6A39B]">
+                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6]">
                   <th className="py-2 font-medium">Khoảng thời gian</th>
                   <th className="py-2 font-medium text-right">Mẫu (n)</th>
                   <th className="py-2 font-medium text-right">Win Rate</th>
@@ -265,7 +265,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 ))}
                 {timeSeriesRows.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-[#6B6963]">
+                    <td colSpan={4} className="py-6 text-center text-[#55534D]">
                       Chưa có dữ liệu theo thời gian.
                     </td>
                   </tr>
@@ -278,13 +278,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         {/* Holding Time Analysis */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
           <h3 className="text-sm font-semibold mb-1">Phân tích thời gian giữ lệnh (Holding Time)</h3>
-          <p className="text-xs text-[#6B6963] dark:text-[#A6A39B] mb-3">
+          <p className="text-xs text-[#55534D] dark:text-[#C2BFB6] mb-3">
             Trung bình toàn bộ: {metrics.avgHoldingMinutes ?? '—'} phút · Thắng: {metrics.avgWinHoldingMinutes ?? '—'}p · Thua: {metrics.avgLossHoldingMinutes ?? '—'}p
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#6B6963] dark:text-[#A6A39B]">
+                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6]">
                   <th className="py-2 font-medium">Khoảng giữ lệnh</th>
                   <th className="py-2 font-medium text-right">Mẫu (n)</th>
                   <th className="py-2 font-medium text-right">Win Rate</th>
@@ -310,7 +310,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 ))}
                 {metrics.holdingTimeBuckets.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-[#6B6963]">
+                    <td colSpan={4} className="py-6 text-center text-[#55534D]">
                       Chưa có dữ liệu thời gian giữ lệnh.
                     </td>
                   </tr>
@@ -351,7 +351,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 >
                   <div>
                     <div className="font-medium">{s.session}</div>
-                    <div className="font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                    <div className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                       n={s.trades} · Win {s.winRate}%
                     </div>
                   </div>
@@ -367,7 +367,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 </div>
               ))}
               {metrics.bySession.length === 0 && (
-                <p className="text-[#6B6963] py-4">Chưa có lệnh trong bộ lọc.</p>
+                <p className="text-[#55534D] py-4">Chưa có lệnh trong bộ lọc.</p>
               )}
             </div>
           )}
@@ -384,7 +384,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               >
                 <div>
                   <div className="font-medium">{s.strategy}</div>
-                  <div className="font-mono-num text-[#6B6963] dark:text-[#A6A39B]">
+                  <div className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                     n={s.trades} · Win {s.winRate}%
                   </div>
                 </div>
@@ -400,7 +400,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
             ))}
             {metrics.byStrategy.length === 0 && (
-              <p className="text-[#6B6963] py-4">Chưa có dữ liệu.</p>
+              <p className="text-[#55534D] py-4">Chưa có dữ liệu.</p>
             )}
           </div>
         </div>
@@ -416,7 +416,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               >
                 <div>
                   <div className="font-medium">{m.tag}</div>
-                  <div className="font-mono-num text-[#6B6963] dark:text-[#A6A39B]">n={m.trades}</div>
+                  <div className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">n={m.trades}</div>
                 </div>
                 <span
                   className={`font-mono-num font-semibold ${
@@ -430,7 +430,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
             ))}
             {metrics.byMistakeTag.length === 0 && (
-              <p className="text-[#6B6963] py-4">Chưa gắn thẻ lỗi sai nào trong Nhật ký.</p>
+              <p className="text-[#55534D] py-4">Chưa gắn thẻ lỗi sai nào trong Nhật ký.</p>
             )}
           </div>
         </div>
@@ -439,7 +439,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Explicit Data Limitations Dictionary */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
         <h3 className="text-sm font-semibold mb-3">Chỉ số nâng cao</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs leading-relaxed text-[#6B6963] dark:text-[#A6A39B]">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs leading-relaxed text-[#55534D] dark:text-[#C2BFB6]">
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">
             <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">R-Multiple</p>
             <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">Chưa đủ dữ liệu</p>
