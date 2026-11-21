@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from './Pagination.tsx';
 import { usePagination } from '../hooks/usePagination.ts';
+import { normalizeServerTimezone } from '../lib/timezone.ts';
 import type { ParsedStatement, SyncLogRecord, WorkspaceDataset } from '../shared/types.ts';
 
 interface SyncAndSettingsViewProps {
@@ -18,12 +19,13 @@ interface SyncAndSettingsViewProps {
   onRefreshWorkspace: () => Promise<void>;
 }
 
+// Giờ trong báo cáo là giờ máy chủ sàn; ứng dụng quy đổi sang giờ Việt Nam để hiển thị.
 const BROKER_TZ_OPTIONS = [
-  { value: 'Unknown', label: 'Unknown (tắt phân tích phiên)' },
-  { value: 'UTC+2', label: 'UTC+2 (MetaTrader mùa Đông)' },
-  { value: 'UTC+3', label: 'UTC+3 (MetaTrader mùa Hè)' },
-  { value: 'UTC+0', label: 'UTC+0 (GMT)' },
-  { value: 'UTC+7', label: 'UTC+7 (Giờ Việt Nam)' },
+  { value: 'MT-auto', label: 'Tự động — MetaTrader/Vantage (UTC+2 mùa Đông, UTC+3 mùa Hè)' },
+  { value: 'UTC+2', label: 'Cố định UTC+2' },
+  { value: 'UTC+3', label: 'Cố định UTC+3' },
+  { value: 'UTC+0', label: 'Cố định UTC+0 (GMT)' },
+  { value: 'UTC+7', label: 'UTC+7 (báo cáo đã là giờ Việt Nam, không quy đổi)' },
 ];
 
 const LOG_PAGE_SIZE = 10;
@@ -92,7 +94,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
     email: string | null;
     error: string | null;
   }>({ loaded: false, configured: false, email: null, error: null });
-  const [lookbackDays, setLookbackDays] = useState<number>(14);
+  const [lookback, setLookback] = useState<'yesterday' | number>('yesterday');
   const [rescan, setRescan] = useState(false);
   const [hideDuplicateLogs, setHideDuplicateLogs] = useState(true);
   const [gmailBusy, setGmailBusy] = useState(false);
@@ -164,7 +166,11 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       const res = await fetch('/api/gmail/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: lookbackDays, dryRun, rescan }),
+        body: JSON.stringify(
+          lookback === 'yesterday'
+            ? { window: 'yesterday', days: 2, dryRun, rescan }
+            : { window: 'days', days: lookback, dryRun, rescan },
+        ),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -250,8 +256,8 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
     if (!acct) return;
     const draft = accountDrafts[id] ?? {
       label: acct.label,
-      serverTimezone: acct.serverTimezone,
-      displayTimezone: acct.displayTimezone,
+      serverTimezone: normalizeServerTimezone(acct.serverTimezone),
+      displayTimezone: 'Asia/Ho_Chi_Minh',
     };
     setSavingId(id);
     setSavedBanner(null);
@@ -347,19 +353,21 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                 </div>
 
                 <p className="text-xs leading-relaxed text-[#55534D] dark:text-[#C2BFB6]">
-                  Hệ thống tự quét lúc 05:30 và 18:00 (giờ Việt Nam) mỗi ngày và khi bạn mở ứng dụng (tối đa 15 phút
-                  một lần). Chỉ email Daily Confirmation chưa xử lý mới được tải về; email đã nhập hoặc trùng sẽ không
-                  bị quét lại.
+                  Hệ thống tự quét một lần mỗi ngày lúc 08:00 (giờ Việt Nam), chỉ lấy báo cáo của ngày T-1. Email đã
+                  nhập hoặc đã bị bỏ qua vì trùng sẽ không bị tải lại. Chọn phạm vi dài hơn bên dưới chỉ khi cần quét bù.
                 </p>
 
                 <div className="flex flex-wrap items-end gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1">Quét bù lịch sử</label>
+                    <label className="block text-xs font-medium mb-1">Phạm vi quét</label>
                     <select
-                      value={lookbackDays}
-                      onChange={(e) => setLookbackDays(Number(e.target.value))}
+                      value={lookback}
+                      onChange={(e) =>
+                        setLookback(e.target.value === 'yesterday' ? 'yesterday' : Number(e.target.value))
+                      }
                       className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm min-h-[44px]"
                     >
+                      <option value="yesterday">Hôm qua (T-1)</option>
                       <option value={7}>7 ngày gần nhất</option>
                       <option value={14}>14 ngày gần nhất</option>
                       <option value={30}>30 ngày gần nhất</option>
@@ -579,8 +587,8 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             {dataset.accounts.map((a) => {
               const draft = accountDrafts[a.id] ?? {
                 label: a.label,
-                serverTimezone: a.serverTimezone,
-                displayTimezone: a.displayTimezone,
+                serverTimezone: normalizeServerTimezone(a.serverTimezone),
+                displayTimezone: 'Asia/Ho_Chi_Minh',
               };
               return (
                 <div
@@ -623,17 +631,12 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1">Múi giờ hiển thị</label>
+                    <label className="block text-xs font-medium mb-1">Múi giờ hiển thị (cố định)</label>
                     <input
                       type="text"
-                      value={draft.displayTimezone}
-                      onChange={(e) =>
-                        setAccountDrafts((p) => ({
-                          ...p,
-                          [a.id]: { ...draft, displayTimezone: e.target.value },
-                        }))
-                      }
-                      className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-2 text-xs font-mono-num"
+                      value="Giờ Việt Nam (UTC+7)"
+                      readOnly
+                      className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#F3F1EC] dark:bg-[#181715] px-3 py-2 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]"
                     />
                   </div>
                   <button

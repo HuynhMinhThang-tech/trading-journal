@@ -37,22 +37,18 @@ const NOTE_FIELDS = [
   {
     key: 'thesis',
     label: 'Lý do vào lệnh',
-    placeholder: 'Vì sao bạn vào lệnh này? Tín hiệu, vùng giá, kế hoạch ban đầu...',
   },
   {
     key: 'marketCondition',
     label: 'Bối cảnh thị trường & nến',
-    placeholder: 'Xu hướng, tin tức, nến xác nhận trông như thế nào...',
   },
   {
     key: 'exitReason',
     label: 'Vì sao cắt sớm / chốt non / thoát lệnh',
-    placeholder: 'Cắt lỗ sớm, chốt non, giữ quá lâu hay đúng kế hoạch? Điều gì khiến bạn thoát lệnh?',
   },
   {
     key: 'lessonLearned',
     label: 'Ghi chú thêm / Bài học',
-    placeholder: 'Lần sau bạn sẽ làm khác đi điều gì?',
   },
 ] as const;
 
@@ -198,8 +194,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
     }
   };
 
-  const documentedCount = trades.filter(hasNote).length;
-
   const renderDetail = (t: TradeRecord) => {
     const isEditing = editingTradeId === t.id;
     const j = t.journal;
@@ -212,7 +206,8 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
       <div className="px-4 py-4 bg-[#FAF9F5] dark:bg-[#181715]/60 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-            {t.openTimeRaw} → {t.closeTimeRaw ?? 'Chưa có giờ đóng'} · Phí/Swap: {formatUsd(feeSwap)}
+            {formatDateTimeDisplay(t.openTimeRaw)} →{' '}
+            {t.closeTimeRaw ? formatDateTimeDisplay(t.closeTimeRaw) : 'Chưa có giờ đóng'} · Phí/Swap: {formatUsd(feeSwap)}
           </p>
           {!isEditing && (
             <button
@@ -235,7 +230,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                   rows={3}
                   value={draft[f.key]}
                   onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder}
                   className={FIELD_CLASS}
                 />
               </div>
@@ -281,17 +275,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Nhật ký giao dịch</h2>
-        <div className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6] shrink-0">
-          Đã ghi nhật ký:{' '}
-          <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">
-            {documentedCount}/{trades.length}
-          </strong>{' '}
-          lệnh
-        </div>
-      </div>
-
       {/* Filters */}
       <div
         data-no-swipe
@@ -347,6 +330,9 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
 
       {/* Trades table: cột chữ căn trái, cột số căn phải (tiêu đề và ô cùng hướng), cột trạng thái căn phải */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <p className="mb-3 text-right text-[11px] font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+          Giờ hiển thị: Việt Nam (UTC+7)
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] table-fixed text-left text-xs">
             <colgroup>

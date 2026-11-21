@@ -4,6 +4,7 @@ import {
   parseVantagePlainText,
   type GmailPayloadPart,
 } from '../lib/parser/vantageParser.ts';
+import { startOfYesterdayVnEpochSeconds } from '../lib/timezone.ts';
 import { commitParsedStatement, getProcessedGmailMessageIds, recordSyncLog } from './store.ts';
 
 // Đồng bộ Gmail hoàn toàn phía máy chủ: dùng Refresh Token dài hạn để tự lấy Access Token,
@@ -151,16 +152,23 @@ export async function getGmailMailboxEmail(): Promise<string | null> {
 
 export async function runGmailSync(options: {
   days: number;
+  /** 'yesterday' = chỉ lấy email nhận từ 00:00 hôm qua (giờ Việt Nam) trở đi; bỏ qua `days`. */
+  window?: 'yesterday' | 'days';
   dryRun: boolean;
   trigger: GmailSyncTrigger;
   /** true = quét lại cả email đã xử lý (vẫn không nhập trùng nhờ kiểm tra ID email + checksum). */
   rescan?: boolean;
 }): Promise<GmailSyncResult> {
-  const { days, dryRun, trigger, rescan = false } = options;
+  const { days, dryRun, trigger, rescan = false, window: syncWindow = 'days' } = options;
   const accessToken = await getAccessToken();
   const headers = { Authorization: `Bearer ${accessToken}` };
 
-  const query = encodeURIComponent(`from:${SENDER} subject:"${SUBJECT}" newer_than:${days}d`);
+  // Báo cáo của ngày T-1 được sàn gửi vào sáng sớm ngày T (giờ Việt Nam). Mốc `after:` là 00:00 hôm qua nên
+  // vừa đủ chứa email báo cáo T-1 (và email báo cáo T-2 đã xử lý hôm trước, bị bỏ qua ngay nhờ sổ ghi nhớ).
+  const timeFilter =
+    syncWindow === 'yesterday' ? `after:${startOfYesterdayVnEpochSeconds()}` : `newer_than:${days}d`;
+  const rangeLabel = syncWindow === 'yesterday' ? 'từ 00:00 hôm qua (giờ Việt Nam)' : `${days} ngày qua`;
+  const query = encodeURIComponent(`from:${SENDER} subject:"${SUBJECT}" ${timeFilter}`);
   const listRes = await fetchWithRetry(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=50`,
     headers,
@@ -213,8 +221,8 @@ export async function runGmailSync(options: {
   };
 
   if (messageRefs.length === 0) {
-    await logNothingNew(`Không tìm thấy email Daily Confirmation mới trong ${days} ngày gần nhất.`);
-    return emptyResult(`Không có email Daily Confirmation mới trong ${days} ngày qua.`);
+    await logNothingNew(`Không tìm thấy email Daily Confirmation mới ${rangeLabel}.`);
+    return emptyResult(`Không có email Daily Confirmation mới ${rangeLabel}.`);
   }
 
   // Chỉ tải về và phân tích những email CHƯA từng xử lý. Việc này chỉ tốn 1 truy vấn nhẹ vào database
@@ -226,7 +234,7 @@ export async function runGmailSync(options: {
   const alreadyProcessed = messageRefs.length - freshRefs.length;
 
   if (freshRefs.length === 0) {
-    const message = `Không có email mới: ${alreadyProcessed} email trong ${days} ngày qua đã được xử lý trước đó.`;
+    const message = `Không có email mới: ${alreadyProcessed} email ${rangeLabel} đã được xử lý trước đó.`;
     await logNothingNew(message);
     return emptyResult(message, alreadyProcessed);
   }

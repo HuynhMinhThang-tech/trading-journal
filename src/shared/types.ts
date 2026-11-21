@@ -196,7 +196,7 @@ export interface TradingAccountRecord {
   label: string;
   accountNumber: string;
   currency: string;
-  serverTimezone: string; // 'Unknown' | 'UTC+0' | 'UTC+2' | 'UTC+3' | 'UTC+7'
+  serverTimezone: string; // 'MT-auto' (UTC+2/+3 theo giờ mùa hè Mỹ) | 'UTC+0' | 'UTC+2' | 'UTC+3' | 'UTC+7'; 'Unknown' cũ = 'MT-auto'
   displayTimezone: string; // 'Asia/Ho_Chi_Minh'
   createdAt: string;
 }

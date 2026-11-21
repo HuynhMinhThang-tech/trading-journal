@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { AlertTriangle } from 'lucide-react';
 import { useIsDark } from '../hooks/useIsDark.ts';
-import { chartColors } from '../lib/pnl.ts';
+import { chartColors, chartTooltipProps } from '../lib/pnl.ts';
 import type { MetricsSummary } from '../shared/types.ts';
 
 interface AnalyticsViewProps {
@@ -35,13 +35,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const isDark = useIsDark();
   const colors = chartColors(isDark);
   const axisTick = { fontSize: 11, fill: colors.axis };
-  const tooltipStyle = {
-    backgroundColor: colors.tooltipBg,
-    border: `1px solid ${colors.tooltipBorder}`,
-    borderRadius: '8px',
-    fontSize: '12px',
-    color: '#F2EFE9',
-  };
+  const tooltip = chartTooltipProps(colors);
 
   const symbolChartData = metrics.bySymbol.map((s) => ({
     symbol: s.symbol,
@@ -171,7 +165,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   <XAxis dataKey="symbol" tick={{ fontSize: 12, fill: colors.axis }} axisLine={false} tickLine={false} />
                   <YAxis tick={axisTick} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip
-                    contentStyle={tooltipStyle}
+                    {...tooltip}
+                    cursor={{ fill: colors.barCursor }}
                     formatter={(v: unknown) => [`$${Number(v).toFixed(2)}`, 'Net P/L']}
                   />
                   <Bar dataKey="netPL" radius={[6, 6, 0, 0]}>
@@ -200,7 +195,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   <XAxis dataKey="bucket" tick={axisTick} axisLine={false} tickLine={false} />
                   <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={tooltipStyle}
+                    {...tooltip}
+                    cursor={{ fill: colors.barCursor }}
                     formatter={(v: unknown) => [`${v} lệnh`, 'Số lượng']}
                   />
                   <Bar dataKey="count" radius={[6, 6, 0, 0]}>

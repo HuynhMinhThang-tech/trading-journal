@@ -16,10 +16,10 @@ import { OfflineIndicator } from './components/OfflineIndicator.tsx';
 import { OverviewView } from './components/OverviewView.tsx';
 import { ResearchView } from './components/ResearchView.tsx';
 import { SyncAndSettingsView } from './components/SyncAndSettingsView.tsx';
-import { useAutoGmailSync } from './hooks/useAutoGmailSync.ts';
 import { useSwipeTabs } from './hooks/useSwipeTabs.ts';
 import { calculateMetrics } from './lib/analytics/metricsEngine.ts';
 import { addDaysIso, isoFromRaw, todayIso } from './lib/dateUtils.ts';
+import { toVietnamTimeDataset } from './lib/timezone.ts';
 import type {
   JournalEntry,
   PriceObservation,
@@ -81,6 +81,8 @@ export default function App() {
   });
 
   const [dataset, setDataset] = useState<WorkspaceDataset | null>(null);
+  // Cùng dữ liệu nhưng mọi giờ giao dịch đã đổi sang giờ Việt Nam (Cài đặt vẫn dùng `dataset` gốc).
+  const vnDataset = useMemo(() => (dataset ? toVietnamTimeDataset(dataset) : null), [dataset]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,9 +125,6 @@ export default function App() {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
-  // Tự quét Gmail khi mở ứng dụng (lịch chạy nền hằng ngày nằm ở máy chủ)
-  useAutoGmailSync(fetchWorkspace);
-
   useEffect(() => {
     if (activeTab !== 'diary') setDiaryDay(null);
   }, [activeTab]);
@@ -164,13 +163,13 @@ export default function App() {
   );
 
   const filteredTrades = useMemo(() => {
-    if (!dataset) return [];
-    return dataset.trades.filter((t) => {
+    if (!vnDataset) return [];
+    return vnDataset.trades.filter((t) => {
       if (accountFilter !== 'ALL' && t.accountId !== accountFilter) return false;
       if (symbolFilter !== 'ALL' && t.symbol !== symbolFilter) return false;
       return isDateInRange(isoFromRaw(t.closeTimeRaw ?? t.openTimeRaw));
     });
-  }, [dataset, accountFilter, symbolFilter, isDateInRange]);
+  }, [vnDataset, accountFilter, symbolFilter, isDateInRange]);
 
   // Số dư hiển thị luôn lấy mốc mới nhất, chỉ phụ thuộc bộ lọc tài khoản (không theo khoảng ngày)
   const balanceSnapshots = useMemo(() => {
@@ -184,17 +183,17 @@ export default function App() {
   );
 
   const filteredMetrics = useMemo(() => {
-    if (!dataset) return null;
-    const unmatchedCount = dataset.reviewItems.filter(
+    if (!vnDataset) return null;
+    const unmatchedCount = vnDataset.reviewItems.filter(
       (r) => r.type === 'unmatched_deal' && r.status === 'pending',
     ).length;
     return calculateMetrics(
       filteredTrades,
       filteredSnapshots,
       unmatchedCount,
-      dataset.accounts,
+      vnDataset.accounts,
     );
-  }, [dataset, filteredTrades, filteredSnapshots]);
+  }, [vnDataset, filteredTrades, filteredSnapshots]);
 
   const handleSaveJournal = async (
     tradeId: string,
@@ -475,7 +474,7 @@ export default function App() {
             <>
               {activeTab === 'overview' && (
                 <OverviewView
-                  dataset={dataset}
+                  dataset={vnDataset ?? dataset}
                   trades={filteredTrades}
                   balanceSnapshots={balanceSnapshots}
                   metrics={filteredMetrics}

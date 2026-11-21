@@ -264,7 +264,7 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       db.select().from(schema.dealsTable).orderBy(desc(schema.dealsTable.timeRaw)),
       db.select().from(schema.accountSnapshots).orderBy(schema.accountSnapshots.reportTimestampRaw),
       db.select().from(schema.journalEntries),
-      db.select().from(schema.priceObservations).orderBy(desc(schema.priceObservations.observedDate), desc(schema.priceObservations.observedTime)),
+      db.select().from(schema.priceObservations).orderBy(desc(schema.priceObservations.observedDate), desc(schema.priceObservations.observedTime), desc(schema.priceObservations.createdAt)),
       db.select().from(schema.reviewOverrides),
       db.select().from(schema.syncLogs).orderBy(desc(schema.syncLogs.createdAt)).limit(200),
     ]);
@@ -540,8 +540,10 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
     deals: [...mem.deals].sort((a, b) => b.timeRaw.localeCompare(a.timeRaw)),
     trades,
     snapshots: [...mem.snapshots].sort((a, b) => a.reportTimestampRaw.localeCompare(b.reportTimestampRaw)),
-    observations: [...mem.observations].sort((a, b) =>
-      `${b.observedDate} ${b.observedTime}`.localeCompare(`${a.observedDate} ${a.observedTime}`),
+    observations: [...mem.observations].sort(
+      (a, b) =>
+        `${b.observedDate} ${b.observedTime}`.localeCompare(`${a.observedDate} ${a.observedTime}`) ||
+        b.createdAt.localeCompare(a.createdAt),
     ),
     reviewItems,
     syncLogs: [...mem.syncLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
@@ -630,7 +632,7 @@ export async function commitParsedStatement(
           label: `Vantage ${acctNum}`,
           accountNumber: acctNum,
           currency: parsed.header.currency,
-          serverTimezone: 'Unknown',
+          serverTimezone: 'MT-auto',
           displayTimezone: 'Asia/Ho_Chi_Minh',
         })
         .onConflictDoNothing();
@@ -783,7 +785,7 @@ export async function commitParsedStatement(
       label: `Vantage ${acctNum}`,
       accountNumber: acctNum,
       currency: parsed.header.currency,
-      serverTimezone: 'Unknown',
+      serverTimezone: 'MT-auto',
       displayTimezone: 'Asia/Ho_Chi_Minh',
       createdAt: new Date().toISOString(),
     });

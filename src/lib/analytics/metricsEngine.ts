@@ -5,6 +5,7 @@ import type {
   TradeRecord,
   TradingAccountRecord,
 } from '../../shared/types.ts';
+import { brokerRawToVietnamRaw, serverUtcOffsetHours, vietnamHourFromBrokerRaw } from '../timezone.ts';
 
 function extractTradeDate(tsRaw: string): string {
   const m = tsRaw.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
@@ -26,25 +27,14 @@ function getIsoWeekKey(dateStr: string): string {
   return `${target.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-function parseUtcOffsetHours(tz: string): number | null {
-  if (!tz || tz.toLowerCase() === 'unknown') return null;
-  if (tz === 'Asia/Ho_Chi_Minh') return 7;
-  const m = tz.match(/^UTC([+-]\d+(?:\.\d+)?)$/i);
-  if (m) return Number(m[1]);
-  return null;
-}
-
+// Giờ (0-23) theo giờ Việt Nam của mốc giờ máy chủ sàn, quy đổi theo cài đặt múi giờ của tài khoản
+// (mặc định tự nhận UTC+2/UTC+3 của MetaTrader; xem src/lib/timezone.ts).
 function resolveVnSessionFromRaw(
   tsRaw: string,
   serverTz: string,
 ): { session: string; available: boolean } {
-  const offset = parseUtcOffsetHours(serverTz);
-  if (offset === null) return { session: 'Chưa xác định múi giờ sàn', available: false };
-  const m = tsRaw.match(/^\d{4}\.\d{2}\.\d{2}\s+(\d{2}):(\d{2})/);
-  if (!m) return { session: 'Không rõ giờ', available: false };
-  const brokerHour = Number(m[1]);
-  // Convert broker hour -> UTC -> UTC+7 (Asia/Ho_Chi_Minh)
-  const vnHour = ((brokerHour - offset + 7) % 24 + 24) % 24;
+  const vnHour = vietnamHourFromBrokerRaw(tsRaw, serverTz);
+  if (vnHour === null) return { session: 'Không rõ giờ', available: false };
   if (vnHour >= 6 && vnHour < 14) return { session: 'Phiên Á (06:00–14:00)', available: true };
   if (vnHour >= 14 && vnHour < 19) return { session: 'Phiên Âu (14:00–19:00)', available: true };
   if (vnHour >= 19 || vnHour < 3) return { session: 'Phiên Mỹ (19:00–03:00)', available: true };
@@ -81,7 +71,7 @@ export function calculateMetrics(
   const ambiguousTrades = trades.filter((t) => t.matchingStatus === 'ambiguous').length;
 
   const accountTzById = new Map(accounts.map((a) => [a.id, a.serverTimezone]));
-  const hasKnownServerTz = accounts.some((a) => parseUtcOffsetHours(a.serverTimezone) !== null);
+  const hasKnownServerTz = accounts.some((a) => serverUtcOffsetHours(a.serverTimezone, 0) !== null);
 
   let netPL = new Decimal(0);
   let grossProfit = new Decimal(0);
@@ -218,7 +208,9 @@ export function calculateMetrics(
     sideEntry.netPL = sideEntry.netPL.plus(net);
 
     // Day / Week / Month breakdowns
-    const dayKey = extractTradeDate(t.closeTimeRaw ?? t.openTimeRaw);
+    // Ngày được tính theo giờ Việt Nam (quy đổi từ giờ máy chủ sàn của tài khoản).
+    const dayTz = accountTzById.get(t.accountId);
+    const dayKey = extractTradeDate(brokerRawToVietnamRaw(t.closeTimeRaw ?? t.openTimeRaw, dayTz));
     const dayEntry = byDayMap.get(dayKey) ?? { trades: 0, wins: 0, netPL: new Decimal(0) };
     dayEntry.trades++;
     if (net.gt(0)) dayEntry.wins++;
@@ -240,7 +232,7 @@ export function calculateMetrics(
     byMonthMap.set(monthKey, monthEntry);
 
     // Session breakdown (only when serverTimezone is known)
-    const serverTz = accountTzById.get(t.accountId) ?? 'Unknown';
+    const serverTz = dayTz ?? 'Unknown';
     const sess = resolveVnSessionFromRaw(t.openTimeRaw, serverTz);
     if (sess.available) {
       const sEntry = bySessionMap.get(sess.session) ?? { trades: 0, wins: 0, netPL: new Decimal(0) };

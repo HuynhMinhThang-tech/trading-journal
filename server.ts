@@ -42,6 +42,8 @@ const commitSchema = z.object({
 
 const gmailSyncSchema = z.object({
   days: z.number().int().min(1).max(365).optional().default(14),
+  // 'yesterday' = chỉ quét email nhận từ 00:00 hôm qua (giờ Việt Nam) trở đi, tức báo cáo ngày T-1.
+  window: z.enum(['yesterday', 'days']).optional().default('days'),
   dryRun: z.boolean().optional().default(false),
   trigger: z.enum(['manual', 'auto']).optional().default('manual'),
   rescan: z.boolean().optional().default(false),
@@ -66,7 +68,8 @@ const journalSchema = z.object({
 const observationSchema = z.object({
   symbol: z.string().min(1, 'Vui lòng nhập mã quan sát'),
   observedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải có dạng YYYY-MM-DD'),
-  observedTime: z.string().regex(/^\d{2}:\d{2}$/, 'Giờ phải có dạng HH:mm'),
+  // Giờ không còn nhập từ giao diện; bản ghi cũ vẫn giữ giờ đã lưu.
+  observedTime: z.string().regex(/^(\d{2}:\d{2})?$/, 'Giờ phải có dạng HH:mm').default(''),
   // Khung thời gian và phiên không còn bắt buộc (giao diện đã bỏ); bản ghi cũ vẫn giữ giá trị đã lưu.
   timeframe: z.enum(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', '']).default(''),
   session: z.enum(['Á', 'Âu', 'Mỹ', 'Giao phiên Âu-Mỹ', '']).default(''),
@@ -232,15 +235,15 @@ app.use(async (req, res, next) => {
     }
   });
 
-  // Vercel Cron gọi định kỳ (xem vercel.json). Nếu đặt CRON_SECRET, Vercel tự gửi kèm
-  // header Authorization: Bearer <CRON_SECRET>.
+  // Vercel Cron gọi mỗi ngày lúc 08:00 giờ Việt Nam (xem vercel.json), chỉ quét báo cáo ngày T-1.
+  // Nếu đặt CRON_SECRET, Vercel tự gửi kèm header Authorization: Bearer <CRON_SECRET>.
   app.get('/api/cron/gmail-sync', async (req, res) => {
     const secret = process.env.CRON_SECRET?.trim();
     if (secret && req.headers.authorization !== `Bearer ${secret}`) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
-      const result = await runGmailSync({ days: 3, dryRun: false, trigger: 'cron' });
+      const result = await runGmailSync({ days: 2, window: 'yesterday', dryRun: false, trigger: 'cron' });
       return res.json(result);
     } catch (err) {
       return sendGmailError(res, err);

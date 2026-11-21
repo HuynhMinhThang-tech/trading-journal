@@ -24,8 +24,8 @@ View your app in AI Studio: https://ai.studio/apps/c9392c47-4417-4fc5-b75b-fdab5
 Ứng dụng đọc email **Daily Confirmation** của Vantage (`from:support@vantagemarkets.com`) hoàn toàn phía máy chủ,
 không cần đăng nhập hay bấm nút trên trình duyệt:
 
-- **Vercel Cron** gọi `/api/cron/gmail-sync` mỗi ngày lúc 22:30 UTC (sau 23:59 giờ sàn) và 11:00 UTC (quét bù) — xem `vercel.json`.
-- Mỗi lần mở ứng dụng, giao diện cũng quét nhẹ 3 ngày gần nhất (một lần mỗi phiên).
+- **Vercel Cron** gọi `/api/cron/gmail-sync` mỗi ngày lúc 01:00 UTC (= 08:00 giờ Việt Nam), chỉ quét email nhận từ 00:00 hôm qua (giờ Việt Nam) trở đi, tức báo cáo ngày T-1; email đã xử lý được bỏ qua — xem `vercel.json`.
+- Ứng dụng không còn tự quét khi mở; muốn lấy ngay thì vào **Đồng bộ & Cài đặt → Đồng bộ ngay** (mặc định chỉ quét hôm qua, T-1).
 - Mọi lần quét đều chống trùng theo ID email và checksum nên chạy lặp lại là an toàn.
 
 ### Cấu hình một lần

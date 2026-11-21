@@ -23,13 +23,16 @@
     --text-secondary: #55534D;
     --accent: #C96442;
 
-    /* Lãi / lỗ */
-    --pnl-win: #15803D;
-    --pnl-loss: #B91C1C;
-    --pnl-win-soft: rgba(21, 128, 61, 0.10);
-    --pnl-loss-soft: rgba(185, 28, 28, 0.10);
-    --pnl-win-line: rgba(21, 128, 61, 0.30);
-    --pnl-loss-line: rgba(185, 28, 28, 0.30);
+    /* Lãi / lỗ. Chữ dùng sắc đậm để đủ tương phản; thanh, biểu đồ và ô lịch dùng sắc tươi hơn
+       (xanh ngọc sáng và đỏ cam) để hai màu tách biệt rõ, kể cả khi khó phân biệt đỏ - xanh lá. */
+    --pnl-win: #007A55;
+    --pnl-loss: #D92D20;
+    --pnl-win-fill: #0DAE7E;
+    --pnl-loss-fill: #D92D20;
+    --pnl-win-soft: rgba(13, 174, 126, 0.16);
+    --pnl-loss-soft: rgba(217, 45, 32, 0.12);
+    --pnl-win-line: rgba(13, 174, 126, 0.55);
+    --pnl-loss-line: rgba(217, 45, 32, 0.45);
 
     color-scheme: light;
   }
@@ -44,12 +47,14 @@
     --accent: #D97757;
 
     /* Giao diện tối: màu sáng, bão hòa cao để lãi / lỗ nổi rõ trên nền tối */
-    --pnl-win: #34E3A0;
-    --pnl-loss: #FF7A85;
-    --pnl-win-soft: rgba(52, 227, 160, 0.16);
-    --pnl-loss-soft: rgba(255, 122, 133, 0.16);
-    --pnl-win-line: rgba(52, 227, 160, 0.45);
-    --pnl-loss-line: rgba(255, 122, 133, 0.45);
+    --pnl-win: #4FE3B0;
+    --pnl-loss: #FF4D4D;
+    --pnl-win-fill: #4FE3B0;
+    --pnl-loss-fill: #FF4D4D;
+    --pnl-win-soft: rgba(79, 227, 176, 0.16);
+    --pnl-loss-soft: rgba(255, 77, 77, 0.18);
+    --pnl-win-line: rgba(79, 227, 176, 0.5);
+    --pnl-loss-line: rgba(255, 77, 77, 0.5);
 
     color-scheme: dark;
   }
@@ -127,11 +132,11 @@
 }
 
 .bg-win {
-  background-color: var(--pnl-win);
+  background-color: var(--pnl-win-fill);
 }
 
 .bg-loss {
-  background-color: var(--pnl-loss);
+  background-color: var(--pnl-loss-fill);
 }
 
 .cal-win {

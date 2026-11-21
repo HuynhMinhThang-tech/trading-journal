@@ -30,7 +30,7 @@ import {
   todayIso,
 } from '../lib/dateUtils.ts';
 import { formatCompactMoney, formatUsd } from '../lib/format.ts';
-import { chartColors, pnlBarClass, pnlTextClass } from '../lib/pnl.ts';
+import { chartColors, chartTooltipProps, pnlBarClass, pnlTextClass } from '../lib/pnl.ts';
 import type {
   AccountSnapshotRecord,
   MetricsSummary,
@@ -373,14 +373,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     width={52}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: colors.tooltipBg,
-                      border: `1px solid ${colors.tooltipBorder}`,
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: '#F2EFE9',
-                    }}
-                    labelStyle={{ color: '#F2EFE9' }}
+                    {...chartTooltipProps(colors)}
                     formatter={(val: unknown) => [formatUsd(Number(val), false), 'Số dư']}
                     labelFormatter={(_label, payload) => {
                       const date = payload?.[0]?.payload?.date as string | undefined;
@@ -473,14 +466,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: colors.tooltipBg,
-                          border: `1px solid ${colors.tooltipBorder}`,
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          color: '#F2EFE9',
-                        }}
-                        itemStyle={{ color: '#F2EFE9' }}
+                        {...chartTooltipProps(colors)}
                         formatter={(val: unknown, name: unknown) => [`${val} lệnh`, String(name)]}
                       />
                     </PieChart>

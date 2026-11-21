@@ -4,7 +4,6 @@ import { MonthCalendar } from './MonthCalendar.tsx';
 import { Pagination } from './Pagination.tsx';
 import { usePagination } from '../hooks/usePagination.ts';
 import { formatIsoDisplay, todayIso } from '../lib/dateUtils.ts';
-import { formatClock } from '../lib/format.ts';
 import type { PriceObservation } from '../shared/types.ts';
 
 interface ResearchViewProps {
@@ -43,7 +42,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   // Form fields
   const [symbol, setSymbol] = useState('NAS100ft');
   const [observedDate, setObservedDate] = useState(() => todayIso());
-  const [observedTime, setObservedTime] = useState(() => formatClock(new Date()));
   const [priceAction, setPriceAction] = useState('');
   const [candlePattern, setCandlePattern] = useState('');
   const [marketContext, setMarketContext] = useState('');
@@ -86,7 +84,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       map.set(o.observedDate, list);
     }
     for (const list of map.values()) {
-      list.sort((a, b) => a.observedTime.localeCompare(b.observedTime));
+      list.sort((a, b) => a.observedTime.localeCompare(b.observedTime) || a.createdAt.localeCompare(b.createdAt));
     }
     return map;
   }, [baseFiltered]);
@@ -131,7 +129,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     setEditingId(null);
     setSymbol('NAS100ft');
     setObservedDate(presetDate ?? todayIso());
-    setObservedTime(formatClock(new Date()));
     setPriceAction('');
     setCandlePattern('');
     setMarketContext('');
@@ -145,7 +142,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     setEditingId(obs.id);
     setSymbol(obs.symbol);
     setObservedDate(obs.observedDate);
-    setObservedTime(obs.observedTime);
     setPriceAction(obs.priceAction);
     setCandlePattern(obs.candlePattern);
     setMarketContext(obs.marketContext);
@@ -158,12 +154,12 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    // Giữ nguyên khung thời gian / phiên đã lưu của bản ghi cũ khi sửa; bản ghi mới để trống.
+    // Giữ nguyên giờ, khung thời gian và phiên đã lưu của bản ghi cũ khi sửa; bản ghi mới để trống.
     const original = editingId ? observations.find((o) => o.id === editingId) : undefined;
     const payload = {
       symbol: symbol.trim(),
       observedDate,
-      observedTime,
+      observedTime: original?.observedTime ?? '',
       timeframe: original?.timeframe ?? ('' as const),
       session: original?.session ?? ('' as const),
       priceAction: priceAction.trim(),
@@ -332,7 +328,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
             <thead>
               <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] text-[#55534D] dark:text-[#C2BFB6]">
                 <th className="py-3 px-4 font-semibold text-left">Mã</th>
-                <th className="py-3 px-3 font-semibold text-left">Ngày · Giờ</th>
+                <th className="py-3 px-3 font-semibold text-left">Ngày</th>
                 <th className="py-3 px-3 font-semibold text-left">Hành động giá</th>
                 <th className="py-3 px-3 font-semibold text-left">Đặc điểm nến</th>
                 <th className="py-3 px-3 font-semibold text-left">Bối cảnh & Tin tức</th>
@@ -358,7 +354,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     >
                       {o.observedDate}
                     </button>
-                    <div className="text-[11px] text-[#55534D] dark:text-[#C2BFB6]">{o.observedTime}</div>
                   </td>
                   <td className="py-3 px-3 text-left break-words">
                     <div className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">{o.priceAction}</div>
@@ -429,7 +424,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               </div>
             </div>
             <div className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-              {o.observedDate} · {o.observedTime}
+              {o.observedDate}
             </div>
             <div className="text-sm font-medium">{o.priceAction}</div>
             <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
@@ -558,9 +553,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs">
                           <strong className="text-sm">{o.symbol}</strong>
-                          <span className="ml-2 font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-                            {o.observedTime}
-                          </span>
                         </div>
                         <div className="flex items-center gap-1">
                           <span className="inline-flex items-center gap-1 text-xs font-mono-num text-[#C96442] dark:text-[#D97757] mr-1">
@@ -629,15 +621,14 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="col-span-2 sm:col-span-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
                   <label className="block text-xs font-medium mb-1">Mã quan sát *</label>
                   <input
                     type="text"
                     required
                     value={symbol}
                     onChange={(e) => setSymbol(e.target.value)}
-                    placeholder="NAS100ft"
                     className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                   />
                 </div>
@@ -648,16 +639,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     required
                     value={observedDate}
                     onChange={(e) => setObservedDate(e.target.value)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm font-mono-num"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Giờ *</label>
-                  <input
-                    type="time"
-                    required
-                    value={observedTime}
-                    onChange={(e) => setObservedTime(e.target.value)}
                     className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm font-mono-num"
                   />
                 </div>
@@ -690,7 +671,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   required
                   value={priceAction}
                   onChange={(e) => setPriceAction(e.target.value)}
-                  placeholder="Mô tả giá đã di chuyển như thế nào..."
                   className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                 />
               </div>
@@ -702,7 +682,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   required
                   value={candlePattern}
                   onChange={(e) => setCandlePattern(e.target.value)}
-                  placeholder="Hình thái nến xác nhận (râu nến, thân nến, volume)..."
                   className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                 />
               </div>
@@ -714,7 +693,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     type="text"
                     value={marketContext}
                     onChange={(e) => setMarketContext(e.target.value)}
-                    placeholder="VD: Trước tin CPI 15 phút, H4 đang tăng..."
                     className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                   />
                 </div>
@@ -724,7 +702,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                     type="text"
                     value={habitTag}
                     onChange={(e) => setHabitTag(e.target.value)}
-                    placeholder="VD: Quét đỉnh phiên Âu rồi sập đầu Mỹ"
                     className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                   />
                 </div>
@@ -736,7 +713,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   rows={2}
                   value={outcomeNote}
                   onChange={(e) => setOutcomeNote(e.target.value)}
-                  placeholder="Giá có đi đúng kỳ vọng không? Có lặp lại thói quen cũ không?"
                   className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
                 />
               </div>
