@@ -376,6 +376,21 @@ export interface MetricsSummary {
   }>;
 }
 
+export type AttachmentOwnerType = 'trade' | 'observation';
+
+/** Thông tin ảnh đính kèm (không kèm nội dung ảnh; ảnh lấy qua GET /api/attachments/:id). */
+export interface ImageAttachmentRecord {
+  id: string;
+  ownerType: AttachmentOwnerType;
+  ownerId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+}
+
 export interface WorkspaceDataset {
   dbConnected: boolean;
   accounts: TradingAccountRecord[];
@@ -387,4 +402,5 @@ export interface WorkspaceDataset {
   observations: PriceObservation[];
   reviewItems: ReviewItem[];
   syncLogs: SyncLogRecord[];
+  attachments: ImageAttachmentRecord[];
 }

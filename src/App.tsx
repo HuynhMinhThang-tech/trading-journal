@@ -22,6 +22,7 @@ import { addDaysIso, isoFromRaw, todayIso } from './lib/dateUtils.ts';
 import { toVietnamTimeDataset } from './lib/timezone.ts';
 import type {
   JournalEntry,
+  ImageAttachmentRecord,
   PriceObservation,
   ThemeMode,
   WorkspaceDataset,
@@ -207,16 +208,33 @@ export default function App() {
     if (res.ok) await fetchWorkspace();
   };
 
+  // Trả về bản ghi vừa tạo để màn hình Nghiên cứu gắn ảnh vào đúng bản ghi đó.
   const handleCreateObservation = async (
     input: Omit<PriceObservation, 'id' | 'createdAt' | 'updatedAt'>,
-  ) => {
+  ): Promise<PriceObservation | null> => {
     const res = await fetch('/api/observations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (res.ok) await fetchWorkspace();
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as { observation?: PriceObservation } | null;
+    await fetchWorkspace();
+    return body?.observation ?? null;
   };
+
+  // Ảnh đính kèm: cập nhật ngay trong state sau khi tải lên / xóa, không cần tải lại toàn bộ dữ liệu.
+  const handleAttachmentAdded = useCallback((attachment: ImageAttachmentRecord) => {
+    setDataset((prev) =>
+      prev ? { ...prev, attachments: [...(prev.attachments ?? []), attachment] } : prev,
+    );
+  }, []);
+
+  const handleAttachmentRemoved = useCallback((id: string) => {
+    setDataset((prev) =>
+      prev ? { ...prev, attachments: (prev.attachments ?? []).filter((a) => a.id !== id) } : prev,
+    );
+  }, []);
 
   const handleUpdateObservation = async (
     id: string,
@@ -488,11 +506,17 @@ export default function App() {
                   focusDay={diaryDay}
                   onClearFocusDay={() => setDiaryDay(null)}
                   onSaveJournal={handleSaveJournal}
+                  attachments={dataset.attachments ?? []}
+                  onAttachmentAdded={handleAttachmentAdded}
+                  onAttachmentRemoved={handleAttachmentRemoved}
                 />
               )}
               {activeTab === 'research' && (
                 <ResearchView
                   observations={dataset.observations}
+                  attachments={dataset.attachments ?? []}
+                  onAttachmentAdded={handleAttachmentAdded}
+                  onAttachmentRemoved={handleAttachmentRemoved}
                   onCreate={handleCreateObservation}
                   onUpdate={handleUpdateObservation}
                   onDelete={handleDeleteObservation}

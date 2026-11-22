@@ -11,6 +11,8 @@ import type {
   ParsedStatement,
   ParseWarning,
   PriceObservation,
+  AttachmentOwnerType,
+  ImageAttachmentRecord,
   ReviewItem,
   RuleAdherence,
   StatementImportRecord,
@@ -18,6 +20,7 @@ import type {
   TradingAccountRecord,
   WorkspaceDataset,
 } from '../shared/types.ts';
+import { MAX_IMAGES_PER_OWNER } from '../shared/attachments.ts';
 import { matchDealsToTrades, type DealWithAccount } from '../lib/trading/tradeMatcher.ts';
 import * as schema from './schema.ts';
 
@@ -37,6 +40,7 @@ const mem = {
   snapshots: [] as AccountSnapshotRecord[],
   journals: new Map<string, JournalEntry>(),
   observations: [] as PriceObservation[],
+  attachments: [] as Array<{ meta: ImageAttachmentRecord; data: Buffer }>,
   reviewOverrides: new Map<string, { status: 'resolved' | 'dismissed'; note: string; dealTicket: string | null; tradeId: string | null; resolvedAt: string }>(),
   syncLogs: [] as SyncLogRecord[],
 };
@@ -206,6 +210,22 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_sync_logs_gmail_msg ON sync_logs(gmail_message_id);
+
+CREATE TABLE IF NOT EXISTS image_attachments (
+  id TEXT PRIMARY KEY,
+  owner_type TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT image_attachments_owner_type_chk CHECK (owner_type IN ('trade', 'observation')),
+  CONSTRAINT image_attachments_size_chk CHECK (size_bytes > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_image_attachments_owner ON image_attachments(owner_type, owner_id);
 `;
 
 export async function initDatabase(): Promise<{ connected: boolean; error: string | null }> {
@@ -257,6 +277,7 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       obsRows,
       overrideRows,
       logRows,
+      attachmentRows,
     ] = await Promise.all([
       db.select().from(schema.tradingAccounts),
       db.select().from(schema.statementImports).orderBy(desc(schema.statementImports.createdAt)),
@@ -267,6 +288,21 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       db.select().from(schema.priceObservations).orderBy(desc(schema.priceObservations.observedDate), desc(schema.priceObservations.observedTime), desc(schema.priceObservations.createdAt)),
       db.select().from(schema.reviewOverrides),
       db.select().from(schema.syncLogs).orderBy(desc(schema.syncLogs.createdAt)).limit(200),
+      // Chỉ lấy thông tin ảnh, KHÔNG lấy cột data (nội dung ảnh) để dữ liệu tải về luôn nhẹ.
+      db
+        .select({
+          id: schema.imageAttachments.id,
+          ownerType: schema.imageAttachments.ownerType,
+          ownerId: schema.imageAttachments.ownerId,
+          fileName: schema.imageAttachments.fileName,
+          mimeType: schema.imageAttachments.mimeType,
+          sizeBytes: schema.imageAttachments.sizeBytes,
+          width: schema.imageAttachments.width,
+          height: schema.imageAttachments.height,
+          createdAt: schema.imageAttachments.createdAt,
+        })
+        .from(schema.imageAttachments)
+        .orderBy(schema.imageAttachments.createdAt),
     ]);
 
     const accounts: TradingAccountRecord[] = acctRows.map((a) => ({
@@ -487,6 +523,17 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       observations,
       reviewItems,
       syncLogs: syncLogsList,
+      attachments: attachmentRows.map((a) => ({
+        id: a.id,
+        ownerType: a.ownerType as AttachmentOwnerType,
+        ownerId: a.ownerId,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        sizeBytes: a.sizeBytes,
+        width: a.width,
+        height: a.height,
+        createdAt: a.createdAt.toISOString(),
+      })),
     };
   }
 
@@ -547,6 +594,7 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
     ),
     reviewItems,
     syncLogs: [...mem.syncLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    attachments: mem.attachments.map((a) => a.meta).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
   };
 }
 
@@ -1031,11 +1079,126 @@ export async function deletePriceObservation(id: string): Promise<boolean> {
       .delete(schema.priceObservations)
       .where(eq(schema.priceObservations.id, id))
       .returning();
+    // Xóa luôn ảnh đính kèm của quan sát này để không để lại ảnh mồ côi trong database.
+    if (rows.length > 0) {
+      await db
+        .delete(schema.imageAttachments)
+        .where(and(eq(schema.imageAttachments.ownerType, 'observation'), eq(schema.imageAttachments.ownerId, id)));
+    }
     return rows.length > 0;
   }
   const before = mem.observations.length;
   mem.observations = mem.observations.filter((o) => o.id !== id);
-  return mem.observations.length < before;
+  const removed = mem.observations.length < before;
+  if (removed) {
+    mem.attachments = mem.attachments.filter((a) => !(a.meta.ownerType === 'observation' && a.meta.ownerId === id));
+  }
+  return removed;
+}
+
+// ---------- Ảnh đính kèm ----------
+
+export class AttachmentError extends Error {
+  constructor(
+    public readonly code: 'limit_reached' | 'owner_not_found',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function createImageAttachment(input: {
+  ownerType: AttachmentOwnerType;
+  ownerId: string;
+  fileName: string;
+  mimeType: string;
+  data: Buffer;
+  width: number | null;
+  height: number | null;
+}): Promise<ImageAttachmentRecord> {
+  const id = `img_${crypto.randomUUID()}`;
+  const now = new Date();
+  const limitMessage = `Mỗi mục chỉ đính kèm tối đa ${MAX_IMAGES_PER_OWNER} ảnh. Hãy xóa bớt ảnh cũ trước.`;
+  const meta: ImageAttachmentRecord = {
+    id,
+    ownerType: input.ownerType,
+    ownerId: input.ownerId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    sizeBytes: input.data.length,
+    width: input.width,
+    height: input.height,
+    createdAt: now.toISOString(),
+  };
+
+  if (dbReady && db) {
+    if (input.ownerType === 'observation') {
+      const owner = await db
+        .select({ id: schema.priceObservations.id })
+        .from(schema.priceObservations)
+        .where(eq(schema.priceObservations.id, input.ownerId));
+      if (owner.length === 0) throw new AttachmentError('owner_not_found', 'Không tìm thấy bản ghi quan sát để đính kèm ảnh.');
+    }
+    const existing = await db
+      .select({ id: schema.imageAttachments.id })
+      .from(schema.imageAttachments)
+      .where(and(eq(schema.imageAttachments.ownerType, input.ownerType), eq(schema.imageAttachments.ownerId, input.ownerId)));
+    if (existing.length >= MAX_IMAGES_PER_OWNER) throw new AttachmentError('limit_reached', limitMessage);
+    await db.insert(schema.imageAttachments).values({
+      id,
+      ownerType: input.ownerType,
+      ownerId: input.ownerId,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      sizeBytes: input.data.length,
+      width: input.width,
+      height: input.height,
+      data: input.data,
+      createdAt: now,
+    });
+    return meta;
+  }
+
+  if (input.ownerType === 'observation' && !mem.observations.some((o) => o.id === input.ownerId)) {
+    throw new AttachmentError('owner_not_found', 'Không tìm thấy bản ghi quan sát để đính kèm ảnh.');
+  }
+  const count = mem.attachments.filter(
+    (a) => a.meta.ownerType === input.ownerType && a.meta.ownerId === input.ownerId,
+  ).length;
+  if (count >= MAX_IMAGES_PER_OWNER) throw new AttachmentError('limit_reached', limitMessage);
+  mem.attachments.push({ meta, data: input.data });
+  return meta;
+}
+
+export async function getImageAttachmentData(
+  id: string,
+): Promise<{ mimeType: string; fileName: string; data: Buffer } | null> {
+  if (dbReady && db) {
+    const rows = await db
+      .select({
+        mimeType: schema.imageAttachments.mimeType,
+        fileName: schema.imageAttachments.fileName,
+        data: schema.imageAttachments.data,
+      })
+      .from(schema.imageAttachments)
+      .where(eq(schema.imageAttachments.id, id));
+    return rows[0] ?? null;
+  }
+  const found = mem.attachments.find((a) => a.meta.id === id);
+  return found ? { mimeType: found.meta.mimeType, fileName: found.meta.fileName, data: found.data } : null;
+}
+
+export async function deleteImageAttachment(id: string): Promise<boolean> {
+  if (dbReady && db) {
+    const rows = await db
+      .delete(schema.imageAttachments)
+      .where(eq(schema.imageAttachments.id, id))
+      .returning({ id: schema.imageAttachments.id });
+    return rows.length > 0;
+  }
+  const before = mem.attachments.length;
+  mem.attachments = mem.attachments.filter((a) => a.meta.id !== id);
+  return mem.attachments.length < before;
 }
 
 export async function resolveReviewItem(

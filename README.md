@@ -47,3 +47,23 @@ Vào tab **Đồng bộ & Cài đặt → Gmail tự động** để thấy tr�
 Nếu Refresh Token hết hạn / bị thu hồi, tab này sẽ hiện lỗi — chỉ cần lặp lại bước 4 và cập nhật `GMAIL_REFRESH_TOKEN`.
 
 > Thư viện `firebase` không còn được dùng. Bạn có thể gỡ bằng `npm uninstall firebase`.
+
+## Ảnh đính kèm (Nhật ký giao dịch và Nghiên cứu hành động giá)
+
+Mỗi lệnh trong **Nhật ký giao dịch** và mỗi bản ghi trong **Nghiên cứu hành động giá** có thể đính kèm ảnh
+(ví dụ ảnh chụp biểu đồ lúc vào/ra lệnh). Ảnh được lưu **trong chính database Neon**, nên không cần dịch vụ lưu trữ nào khác.
+
+- Chỉ nhận **JPEG, PNG, WebP, GIF**. Máy chủ nhận dạng theo nội dung file (không tin đuôi file), SVG và mọi định dạng khác bị từ chối.
+- Tối đa **10 ảnh** mỗi lệnh / mỗi quan sát, mỗi ảnh tối đa **4 MB**. Ảnh có cạnh dài hơn 2400 px hoặc nặng hơn 1,5 MB được tự thu nhỏ/nén (WebP) trước khi tải lên.
+- Thêm ảnh bằng nút **Thêm ảnh**, kéo thả, hoặc dán ảnh chụp màn hình bằng **Ctrl+V**. Bấm vào ảnh để xem phóng to; nút **×** để xóa.
+- Trong Nhật ký giao dịch, ảnh được lưu/xóa ngay. Trong form Nghiên cứu, ảnh chỉ được lưu/xóa khi bấm **Lưu** (bấm **Hủy** thì bỏ hết thay đổi).
+- Xóa một quan sát cũng xóa luôn ảnh của nó.
+
+### Cập nhật database
+
+Tính năng này thêm bảng `image_attachments`. Ứng dụng **tự tạo bảng khi khởi động** (`CREATE TABLE IF NOT EXISTS`),
+nên sau khi deploy bạn không cần làm gì thêm. Nếu muốn tự chạy hoặc kiểm tra, dùng file
+[`db/migrations/001_image_attachments.sql`](db/migrations/001_image_attachments.sql) trong **Neon → SQL Editor** (chạy lặp lại an toàn).
+
+Lưu ý: file xuất JSON/CSV/ZIP chỉ gồm thông tin ảnh (tên, dung lượng, thuộc lệnh/quan sát nào), không gồm nội dung ảnh.
+Ảnh chiếm dung lượng database (gói Neon miễn phí là 0,5 GB); xem dung lượng đang dùng bằng câu lệnh trong cuối file migration.

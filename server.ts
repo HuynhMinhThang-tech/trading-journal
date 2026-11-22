@@ -9,6 +9,7 @@ import {
   parseVantageHtml,
   parseVantagePlainText,
 } from './src/lib/parser/vantageParser.ts';
+import { MAX_IMAGE_BYTES, sniffImageMime } from './src/shared/attachments.ts';
 import {
   GmailSyncError,
   getGmailMailboxEmail,
@@ -16,11 +17,15 @@ import {
   runGmailSync,
 } from './src/server/gmailSync.ts';
 import {
+  AttachmentError,
   BOOTSTRAP_SQL,
   commitParsedStatement,
+  createImageAttachment,
   createPriceObservation,
+  deleteImageAttachment,
   deletePriceObservation,
   getDatabaseStatus,
+  getImageAttachmentData,
   getWorkspaceDataset,
   initDatabase,
   resolveReviewItem,
@@ -80,6 +85,34 @@ const observationSchema = z.object({
   habitTag: z.string().default(''),
   outcomeNote: z.string().default(''),
 });
+
+const attachmentUploadQuerySchema = z.object({
+  ownerType: z.enum(['trade', 'observation']),
+  // id lệnh (trd_...) hoặc id quan sát (obs_...): chỉ gồm chữ, số và _ : . -
+  ownerId: z.string().regex(/^[\w:.\-]{1,200}$/, 'Mã đối tượng không hợp lệ'),
+  name: z.string().max(300).optional().default('anh'),
+  width: z.coerce.number().int().min(1).max(30000).optional(),
+  height: z.coerce.number().int().min(1).max(30000).optional(),
+});
+
+const imageTooLargeMessage = () =>
+  `Ảnh quá lớn (tối đa ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB). Hãy chọn ảnh nhỏ hơn.`;
+
+// Đọc thân request của ảnh. Với Content-Type application/octet-stream, Vercel đã đọc sẵn thân request và gán
+// req.body là Buffer: khi đó dùng luôn, không đọc lại luồng đã bị tiêu thụ. Chạy cục bộ thì đọc luồng bằng express.raw.
+const readImageBody: express.RequestHandler = (req, res, next) => {
+  if (Buffer.isBuffer(req.body)) {
+    if (req.body.length > MAX_IMAGE_BYTES) return res.status(413).json({ error: imageTooLargeMessage() });
+    return next();
+  }
+  return express.raw({ type: () => true, limit: MAX_IMAGE_BYTES })(req, res, next);
+};
+
+// Bỏ ký tự điều khiển / dấu phân cách đường dẫn khỏi tên file người dùng đặt.
+function sanitizeFileName(name: string): string {
+  const cleaned = name.replace(/[\u0000-\u001f\u007f\\/]+/g, '_').trim().slice(0, 120);
+  return cleaned || 'anh';
+}
 
 const reviewResolveSchema = z.object({
   status: z.enum(['resolved', 'dismissed']),
@@ -304,6 +337,69 @@ app.use(async (req, res, next) => {
     }
   });
 
+  // ---------- Ảnh đính kèm (Nhật ký giao dịch và Nghiên cứu hành động giá) ----------
+  // Nhận ảnh dạng nhị phân thô trong thân request (không dùng base64 để tiết kiệm dung lượng).
+  // Máy chủ tự nhận dạng ảnh theo nội dung file; chỉ chấp nhận JPEG, PNG, WebP, GIF.
+  app.post('/api/attachments', readImageBody, async (req, res) => {
+    const query = attachmentUploadQuerySchema.safeParse(req.query);
+    if (!query.success) {
+      return res.status(400).json({ error: query.error.issues[0]?.message ?? 'Thông tin ảnh không hợp lệ.' });
+    }
+    const body: unknown = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return res.status(415).json({ error: 'Chỉ nhận tệp ảnh JPEG, PNG, WebP hoặc GIF.' });
+    }
+    const mimeType = sniffImageMime(body);
+    if (!mimeType) {
+      return res.status(415).json({ error: 'Tệp không phải ảnh hợp lệ. Chỉ nhận JPEG, PNG, WebP hoặc GIF.' });
+    }
+    try {
+      const attachment = await createImageAttachment({
+        ownerType: query.data.ownerType,
+        ownerId: query.data.ownerId,
+        fileName: sanitizeFileName(query.data.name),
+        mimeType,
+        data: body,
+        width: query.data.width ?? null,
+        height: query.data.height ?? null,
+      });
+      return res.status(201).json({ attachment });
+    } catch (err) {
+      if (err instanceof AttachmentError) {
+        return res.status(err.code === 'owner_not_found' ? 404 : 409).json({ error: err.message });
+      }
+      console.error('Attachment upload error:', err);
+      return res.status(500).json({ error: 'Không thể lưu ảnh.' });
+    }
+  });
+
+  app.get('/api/attachments/:id', async (req, res) => {
+    try {
+      const image = await getImageAttachmentData(req.params.id);
+      if (!image) return res.status(404).json({ error: 'Không tìm thấy ảnh.' });
+      res.setHeader('Content-Type', image.mimeType);
+      // id ảnh là duy nhất và nội dung không bao giờ đổi nên trình duyệt có thể lưu đệm lâu dài.
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      return res.send(image.data);
+    } catch (err) {
+      console.error('Attachment read error:', err);
+      return res.status(500).json({ error: 'Không thể đọc ảnh.' });
+    }
+  });
+
+  app.delete('/api/attachments/:id', async (req, res) => {
+    try {
+      const ok = await deleteImageAttachment(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Không tìm thấy ảnh cần xóa.' });
+      return res.json({ deleted: true });
+    } catch (err) {
+      console.error('Attachment delete error:', err);
+      return res.status(500).json({ error: 'Không thể xóa ảnh.' });
+    }
+  });
+
   app.post('/api/review/:id/resolve', async (req, res) => {
     const parsed = reviewResolveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -414,6 +510,9 @@ app.use(async (req, res, next) => {
 
 // Explicit error handling keeps failed requests isolated within a serverless invocation.
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if ((error as { type?: string } | null)?.type === 'entity.too.large') {
+    return res.status(413).json({ error: imageTooLargeMessage() });
+  }
   console.error('Unhandled API error:', error);
   if (!res.headersSent) {
     res.status(500).json({ error: 'Lỗi máy chủ. Vui lòng thử lại.' });

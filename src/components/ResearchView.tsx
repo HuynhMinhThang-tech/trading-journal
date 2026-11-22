@@ -1,14 +1,30 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Edit3, List, Plus, Search, Star, Trash2, X } from 'lucide-react';
+import { ImageGallery, ThumbStrip, handleImagePaste, type GalleryItem } from './ImageGallery.tsx';
 import { MonthCalendar } from './MonthCalendar.tsx';
 import { Pagination } from './Pagination.tsx';
 import { usePagination } from '../hooks/usePagination.ts';
+import {
+  ImageUploadError,
+  attachmentUrl,
+  deleteAttachment,
+  prepareImageForUpload,
+  uploadAttachment,
+  type PreparedImage,
+} from '../lib/attachments.ts';
 import { formatIsoDisplay, todayIso } from '../lib/dateUtils.ts';
-import type { PriceObservation } from '../shared/types.ts';
+import { MAX_IMAGES_PER_OWNER } from '../shared/attachments.ts';
+import type { ImageAttachmentRecord, PriceObservation } from '../shared/types.ts';
 
 interface ResearchViewProps {
   observations: PriceObservation[];
-  onCreate: (input: Omit<PriceObservation, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  attachments: ImageAttachmentRecord[];
+  onAttachmentAdded: (attachment: ImageAttachmentRecord) => void;
+  onAttachmentRemoved: (id: string) => void;
+  /** Trả về bản ghi vừa tạo (để gắn ảnh vào đó) hoặc null nếu lưu thất bại. */
+  onCreate: (
+    input: Omit<PriceObservation, 'id' | 'createdAt' | 'updatedAt'>,
+  ) => Promise<PriceObservation | null | void>;
   onUpdate: (
     id: string,
     input: Omit<PriceObservation, 'id' | 'createdAt' | 'updatedAt'>,
@@ -18,8 +34,18 @@ interface ResearchViewProps {
 
 const PAGE_SIZE = 10;
 
+// Ảnh vừa chọn trong form, chỉ được tải lên khi bấm "Lưu" (để nút "Hủy" bỏ được tất cả thay đổi).
+interface PendingImage {
+  key: string;
+  prepared: PreparedImage;
+  previewUrl: string;
+}
+
 export const ResearchView: React.FC<ResearchViewProps> = ({
   observations,
+  attachments,
+  onAttachmentAdded,
+  onAttachmentRemoved,
   onCreate,
   onUpdate,
   onDelete,
@@ -48,6 +74,35 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const [confidence, setConfidence] = useState<number>(4);
   const [habitTag, setHabitTag] = useState('');
   const [outcomeNote, setOutcomeNote] = useState('');
+
+  // Ảnh trong form: ảnh mới chọn (chưa lưu) và ảnh đã lưu bị đánh dấu xóa (xóa thật khi bấm "Lưu")
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [removedImageIds, setRemovedImageIds] = useState<string[]>([]);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const pendingRef = useRef<PendingImage[]>([]);
+  pendingRef.current = pendingImages;
+  // Giải phóng các URL xem trước khi rời màn hình
+  useEffect(
+    () => () => {
+      pendingRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    },
+    [],
+  );
+
+  const imagesByObservation = useMemo(() => {
+    const map = new Map<string, ImageAttachmentRecord[]>();
+    for (const a of attachments) {
+      if (a.ownerType !== 'observation') continue;
+      const list = map.get(a.ownerId) ?? [];
+      list.push(a);
+      map.set(a.ownerId, list);
+    }
+    return map;
+  }, [attachments]);
+
+  const thumbsFor = (id: string) =>
+    (imagesByObservation.get(id) ?? []).map((a) => ({ key: a.id, url: attachmentUrl(a.id), name: a.fileName }));
 
   const symbols = useMemo(() => {
     const s = new Set(observations.map((o) => o.symbol));
@@ -125,7 +180,21 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       .slice(0, 6);
   }, [filtered]);
 
+  const resetImageState = () => {
+    pendingRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    setPendingImages([]);
+    setRemovedImageIds([]);
+    setImageError(null);
+    setImageBusy(false);
+  };
+
+  const closeModal = () => {
+    resetImageState();
+    setModalOpen(false);
+  };
+
   const openNewModal = (presetDate?: string) => {
+    resetImageState();
     setEditingId(null);
     setSymbol('NAS100ft');
     setObservedDate(presetDate ?? todayIso());
@@ -139,6 +208,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   };
 
   const openEditModal = (obs: PriceObservation) => {
+    resetImageState();
     setEditingId(obs.id);
     setSymbol(obs.symbol);
     setObservedDate(obs.observedDate);
@@ -149,6 +219,55 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     setHabitTag(obs.habitTag);
     setOutcomeNote(obs.outcomeNote);
     setModalOpen(true);
+  };
+
+  const savedImages = editingId
+    ? (imagesByObservation.get(editingId) ?? []).filter((a) => !removedImageIds.includes(a.id))
+    : [];
+  const galleryItems: GalleryItem[] = [
+    ...savedImages.map((a) => ({ key: a.id, url: attachmentUrl(a.id), name: a.fileName })),
+    ...pendingImages.map((p) => ({ key: `pending:${p.key}`, url: p.previewUrl, name: p.prepared.fileName, pending: true })),
+  ];
+
+  const addFormImages = async (files: File[]) => {
+    setImageError(null);
+    setImageBusy(true);
+    const problems: string[] = [];
+    let count = galleryItems.length;
+    for (const file of files) {
+      if (count >= MAX_IMAGES_PER_OWNER) {
+        problems.push(`Mỗi quan sát chỉ đính kèm tối đa ${MAX_IMAGES_PER_OWNER} ảnh, các ảnh còn lại đã bị bỏ qua.`);
+        break;
+      }
+      try {
+        const prepared = await prepareImageForUpload(file);
+        const item: PendingImage = {
+          key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          prepared,
+          previewUrl: URL.createObjectURL(prepared.blob),
+        };
+        setPendingImages((prev) => [...prev, item]);
+        count += 1;
+      } catch (err) {
+        problems.push(err instanceof ImageUploadError ? err.message : `Không đọc được "${file.name}".`);
+      }
+    }
+    setImageBusy(false);
+    if (problems.length > 0) setImageError(problems.join(' '));
+  };
+
+  const removeFormImage = (key: string) => {
+    setImageError(null);
+    if (key.startsWith('pending:')) {
+      const pendingKey = key.slice('pending:'.length);
+      setPendingImages((prev) => {
+        const target = prev.find((p) => p.key === pendingKey);
+        if (target) URL.revokeObjectURL(target.previewUrl);
+        return prev.filter((p) => p.key !== pendingKey);
+      });
+    } else {
+      setRemovedImageIds((prev) => [...prev, key]);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -170,12 +289,47 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       outcomeNote: outcomeNote.trim(),
     };
     try {
+      let targetId = editingId;
       if (editingId) {
         await onUpdate(editingId, payload);
       } else {
-        await onCreate(payload);
+        const created = await onCreate(payload);
+        if (!created) {
+          setImageError('Không lưu được bản ghi quan sát. Vui lòng thử lại.');
+          return;
+        }
+        targetId = created.id;
+        // Nếu bước tải ảnh bên dưới lỗi, bấm "Lưu" lần nữa sẽ cập nhật bản ghi này thay vì tạo thêm bản ghi trùng.
+        setEditingId(created.id);
       }
-      setModalOpen(false);
+
+      const problems: string[] = [];
+      for (const id of removedImageIds) {
+        try {
+          await deleteAttachment(id);
+          onAttachmentRemoved(id);
+          setRemovedImageIds((prev) => prev.filter((x) => x !== id));
+        } catch (err) {
+          problems.push(err instanceof ImageUploadError ? err.message : 'Không thể xóa một ảnh.');
+        }
+      }
+      if (targetId) {
+        for (const item of pendingImages) {
+          try {
+            const saved = await uploadAttachment('observation', targetId, item.prepared);
+            onAttachmentAdded(saved);
+            URL.revokeObjectURL(item.previewUrl);
+            setPendingImages((prev) => prev.filter((p) => p.key !== item.key));
+          } catch (err) {
+            problems.push(err instanceof ImageUploadError ? err.message : `Không thể tải "${item.prepared.fileName}" lên.`);
+          }
+        }
+      }
+      if (problems.length > 0) {
+        setImageError(`Đã lưu quan sát nhưng chưa xử lý xong ảnh. ${problems.join(' ')} Bấm "Lưu" để thử lại.`);
+        return;
+      }
+      closeModal();
     } finally {
       setSaving(false);
     }
@@ -357,6 +511,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                   </td>
                   <td className="py-3 px-3 text-left break-words">
                     <div className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">{o.priceAction}</div>
+                    <ThumbStrip items={thumbsFor(o.id)} />
                     {o.habitTag && (
                       <div className="mt-0.5 text-[11px] text-[#C96442]">Thói quen: {o.habitTag}</div>
                     )}
@@ -427,6 +582,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               {o.observedDate}
             </div>
             <div className="text-sm font-medium">{o.priceAction}</div>
+            <ThumbStrip items={thumbsFor(o.id)} />
             <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
               <strong>Nến:</strong> {o.candlePattern}
             </div>
@@ -578,6 +734,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                         </div>
                       </div>
                       <p className="text-sm font-medium">{o.priceAction}</p>
+                      <ThumbStrip items={thumbsFor(o.id)} />
                       <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
                         <strong>Nến:</strong> {o.candlePattern}
                       </p>
@@ -613,14 +770,19 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
               </h3>
               <button
                 type="button"
-                onClick={() => setModalOpen(false)}
+                onClick={closeModal}
+                aria-label="Đóng"
                 className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+            <form
+              onSubmit={handleSubmit}
+              onPaste={(e) => handleImagePaste(e, (files) => void addFormImages(files))}
+              className="mt-4 space-y-4"
+            >
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium mb-1">Mã quan sát *</label>
@@ -717,10 +879,22 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-medium mb-1">Hình ảnh</label>
+                <ImageGallery
+                  items={galleryItems}
+                  onAddFiles={(files) => void addFormImages(files)}
+                  onRemove={removeFormImage}
+                  busy={imageBusy}
+                  error={imageError}
+                  disabled={saving}
+                />
+              </div>
+
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
+                  onClick={closeModal}
                   className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2 text-sm font-medium min-h-[42px]"
                 >
                   Hủy

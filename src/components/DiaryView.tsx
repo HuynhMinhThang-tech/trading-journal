@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronDown, Search, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Image as ImageIcon, Search, X } from 'lucide-react';
+import { ImageGallery, handleImagePaste, type GalleryItem } from './ImageGallery.tsx';
 import { Pagination } from './Pagination.tsx';
 import { usePagination } from '../hooks/usePagination.ts';
+import {
+  ImageUploadError,
+  attachmentUrl,
+  deleteAttachment,
+  prepareImageForUpload,
+  uploadAttachment,
+} from '../lib/attachments.ts';
 import { formatIsoDisplay, isoFromRaw } from '../lib/dateUtils.ts';
 import {
   formatDateTimeDisplay,
@@ -10,7 +18,8 @@ import {
   formatUsd,
 } from '../lib/format.ts';
 import { pnlTextClass } from '../lib/pnl.ts';
-import type { JournalEntry, TradeRecord } from '../shared/types.ts';
+import { MAX_IMAGES_PER_OWNER } from '../shared/attachments.ts';
+import type { ImageAttachmentRecord, JournalEntry, TradeRecord } from '../shared/types.ts';
 
 interface DiaryViewProps {
   trades: TradeRecord[];
@@ -21,6 +30,10 @@ interface DiaryViewProps {
     tradeId: string,
     payload: Omit<JournalEntry, 'id' | 'tradeId' | 'updatedAt'>,
   ) => Promise<void>;
+  /** Toàn bộ ảnh đính kèm (lọc theo lệnh bên trong). */
+  attachments: ImageAttachmentRecord[];
+  onAttachmentAdded: (attachment: ImageAttachmentRecord) => void;
+  onAttachmentRemoved: (id: string) => void;
 }
 
 const PAGE_SIZE = 10;
@@ -73,6 +86,9 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   focusDay,
   onClearFocusDay,
   onSaveJournal,
+  attachments,
+  onAttachmentAdded,
+  onAttachmentRemoved,
 }) => {
   const [noteFilter, setNoteFilter] = useState<'all' | 'documented' | 'missing'>('all');
   const [sideFilter, setSideFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
@@ -81,6 +97,65 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<NoteDraft>(EMPTY_DRAFT);
+  const [imageBusy, setImageBusy] = useState<Set<string>>(new Set());
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+
+  // Ảnh của từng lệnh (ảnh được lưu ngay khi tải lên, không phụ thuộc nút "Lưu ghi chú")
+  const imagesByTrade = useMemo(() => {
+    const map = new Map<string, ImageAttachmentRecord[]>();
+    for (const a of attachments) {
+      if (a.ownerType !== 'trade') continue;
+      const list = map.get(a.ownerId) ?? [];
+      list.push(a);
+      map.set(a.ownerId, list);
+    }
+    return map;
+  }, [attachments]);
+
+  const setTradeImageError = (tradeId: string, message: string | null) =>
+    setImageErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[tradeId] = message;
+      else delete next[tradeId];
+      return next;
+    });
+
+  const addImages = async (tradeId: string, files: File[]) => {
+    setTradeImageError(tradeId, null);
+    setImageBusy((prev) => new Set(prev).add(tradeId));
+    const problems: string[] = [];
+    let count = imagesByTrade.get(tradeId)?.length ?? 0;
+    for (const file of files) {
+      if (count >= MAX_IMAGES_PER_OWNER) {
+        problems.push(`Mỗi lệnh chỉ đính kèm tối đa ${MAX_IMAGES_PER_OWNER} ảnh, các ảnh còn lại đã bị bỏ qua.`);
+        break;
+      }
+      try {
+        const saved = await uploadAttachment('trade', tradeId, await prepareImageForUpload(file));
+        onAttachmentAdded(saved);
+        count += 1;
+      } catch (err) {
+        problems.push(err instanceof ImageUploadError ? err.message : `Không thể tải "${file.name}" lên.`);
+      }
+    }
+    setImageBusy((prev) => {
+      const next = new Set(prev);
+      next.delete(tradeId);
+      return next;
+    });
+    if (problems.length > 0) setTradeImageError(tradeId, problems.join(' '));
+  };
+
+  const removeImage = async (tradeId: string, attachmentId: string) => {
+    if (typeof window.confirm === 'function' && !window.confirm('Xóa ảnh này khỏi nhật ký?')) return;
+    setTradeImageError(tradeId, null);
+    try {
+      await deleteAttachment(attachmentId);
+      onAttachmentRemoved(attachmentId);
+    } catch (err) {
+      setTradeImageError(tradeId, err instanceof ImageUploadError ? err.message : 'Không thể xóa ảnh.');
+    }
+  };
 
   const sortedTrades = useMemo(() => {
     return [...trades].sort((a, b) =>
@@ -202,8 +277,17 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
     if (j?.strategy) legacy.push(`Chiến lược: ${j.strategy}`);
     if (j && j.mistakeTags.length > 0) legacy.push(`Thẻ lỗi: ${j.mistakeTags.join(' · ')}`);
 
+    const galleryItems: GalleryItem[] = (imagesByTrade.get(t.id) ?? []).map((a) => ({
+      key: a.id,
+      url: attachmentUrl(a.id),
+      name: a.fileName,
+    }));
+
     return (
-      <div className="px-4 py-4 bg-[#FAF9F5] dark:bg-[#181715]/60 space-y-3">
+      <div
+        className="px-4 py-4 bg-[#FAF9F5] dark:bg-[#181715]/60 space-y-3"
+        onPaste={(e) => handleImagePaste(e, (files) => void addImages(t.id, files))}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
             {formatDateTimeDisplay(t.openTimeRaw)} →{' '}
@@ -219,6 +303,17 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
               <span>{hasNote(t) ? 'Chỉnh sửa ghi chú' : 'Viết ghi chú'}</span>
             </button>
           )}
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs font-semibold">Hình ảnh</p>
+          <ImageGallery
+            items={galleryItems}
+            onAddFiles={(files) => void addImages(t.id, files)}
+            onRemove={(key) => void removeImage(t.id, key)}
+            busy={imageBusy.has(t.id)}
+            error={imageErrors[t.id] ?? null}
+          />
         </div>
 
         {isEditing ? (
@@ -402,7 +497,18 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                                   {tickerShort}
                                 </span>
                                 <div className="min-w-0">
-                                  <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9] truncate">{t.symbol}</p>
+                                  <p className="flex items-center gap-1.5 font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
+                                    <span className="truncate">{t.symbol}</span>
+                                    {(imagesByTrade.get(t.id)?.length ?? 0) > 0 && (
+                                      <span
+                                        className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-semibold font-mono-num text-[#55534D] dark:text-[#C2BFB6]"
+                                        title="Số ảnh đính kèm"
+                                      >
+                                        <ImageIcon className="h-3.5 w-3.5" />
+                                        {imagesByTrade.get(t.id)?.length}
+                                      </span>
+                                    )}
+                                  </p>
                                   <p className="text-[11px] font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                                     {formatDateTimeDisplay(t.openTimeRaw)}
                                   </p>

@@ -1,4 +1,6 @@
 import {
+  customType,
+  index,
   integer,
   jsonb,
   numeric,
@@ -7,6 +9,13 @@ import {
   timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+
+// Cột BYTEA (nội dung ảnh): node-postgres trả về / nhận Buffer.
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 export const tradingAccounts = pgTable(
   'trading_accounts',
@@ -202,3 +211,21 @@ export const syncLogs = pgTable('sync_logs', {
   message: text('message').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// Ảnh đính kèm cho lệnh (owner_type = 'trade') và quan sát giá (owner_type = 'observation').
+export const imageAttachments = pgTable(
+  'image_attachments',
+  {
+    id: text('id').primaryKey(),
+    ownerType: text('owner_type').notNull(),
+    ownerId: text('owner_id').notNull(),
+    fileName: text('file_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    data: bytea('data').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_image_attachments_owner').on(t.ownerType, t.ownerId)],
+);
