@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronRight,
   Database,
   Download,
   FileText,
@@ -10,6 +11,9 @@ import {
   Upload,
 } from 'lucide-react';
 import { Pagination } from './Pagination.tsx';
+import { BottomSheet } from './ui/BottomSheet.tsx';
+import { StatGrid } from './ui/StatGrid.tsx';
+import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { usePagination } from '../hooks/usePagination.ts';
 import { normalizeServerTimezone } from '../lib/timezone.ts';
 import type { ParsedStatement, SyncLogRecord, WorkspaceDataset } from '../shared/types.ts';
@@ -37,6 +41,15 @@ const LOG_STATUS_META: Record<SyncLogRecord['status'], { label: string; classNam
   no_new_email: { label: 'Không có email mới', className: 'text-[#55534D] dark:text-[#C2BFB6]' },
   rejected: { label: 'Bị từ chối', className: 'text-loss' },
   failed: { label: 'Lỗi', className: 'text-loss' },
+};
+
+const LOG_STATUS_DOT: Record<SyncLogRecord['status'], string> = {
+  imported: 'bg-win',
+  partial: 'bg-amber-500',
+  skipped_duplicate: 'bg-[#8A877E]',
+  no_new_email: 'bg-[#8A877E]',
+  rejected: 'bg-loss',
+  failed: 'bg-loss',
 };
 
 const LOG_SOURCE_LABELS: Record<SyncLogRecord['source'], string> = {
@@ -86,6 +99,9 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
   onRefreshWorkspace,
 }) => {
   const [methodTab, setMethodTab] = useState<'gmail' | 'paste' | 'eml'>('gmail');
+  const isMobile = useIsMobile();
+  // Điện thoại: dòng nhật ký đang mở trong panel chi tiết
+  const [logDetail, setLogDetail] = useState<SyncLogRecord | null>(null);
 
   // Gmail state (đồng bộ chạy hoàn toàn trên máy chủ bằng Refresh Token)
   const [gmailStatus, setGmailStatus] = useState<{
@@ -275,47 +291,50 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 lg:space-y-5">
       {/* 1. Email Daily Confirmation Import */}
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E7E5E0] dark:border-[#32302B]">
           <h2 className="text-base font-semibold">Nhập báo cáo Daily Confirmation từ Email</h2>
-          <div className="inline-flex rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1 self-start">
+          <div className="flex w-full sm:inline-flex sm:w-auto rounded-xl sm:rounded-lg bg-[#F3F1EC] dark:bg-[#181715] p-1 self-start">
             <button
               type="button"
               onClick={() => setMethodTab('gmail')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-1.5 min-h-[38px] sm:min-h-0 text-xs font-medium rounded-lg sm:rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'gmail'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
                   : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <Mail className="w-3.5 h-3.5" />
-              <span>Gmail tự động</span>
+              <span className="sm:hidden">Gmail</span>
+              <span className="hidden sm:inline">Gmail tự động</span>
             </button>
             <button
               type="button"
               onClick={() => setMethodTab('paste')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-1.5 min-h-[38px] sm:min-h-0 text-xs font-medium rounded-lg sm:rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'paste'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
                   : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Dán nội dung</span>
+              <span className="sm:hidden">Dán</span>
+              <span className="hidden sm:inline">Dán nội dung</span>
             </button>
             <button
               type="button"
               onClick={() => setMethodTab('eml')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-1.5 min-h-[38px] sm:min-h-0 text-xs font-medium rounded-lg sm:rounded-md transition-colors whitespace-nowrap ${
                 methodTab === 'eml'
                   ? 'bg-white dark:bg-[#2A2925] text-[#1C1B18] dark:text-[#F2EFE9] shadow-xs'
                   : 'text-[#55534D] dark:text-[#C2BFB6]'
               }`}
             >
               <Upload className="w-3.5 h-3.5" />
-              <span>Tải file .eml</span>
+              <span className="sm:hidden">File .eml</span>
+              <span className="hidden sm:inline">Tải file .eml</span>
             </button>
           </div>
         </div>
@@ -565,7 +584,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       </div>
 
       {/* 2. Timezone & Storage Status + Export / PWA */}
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 space-y-4">
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E7E5E0] dark:border-[#32302B]">
           <h3 className="text-sm font-semibold">Cài đặt tài khoản & Lưu trữ</h3>
           <div className="inline-flex items-center gap-1.5 text-xs font-medium shrink-0">
@@ -643,7 +662,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                     type="button"
                     disabled={savingId === a.id}
                     onClick={() => saveAccount(a.id)}
-                    className="rounded-lg bg-[#1C1B18] dark:bg-[#F2EFE9] text-white dark:text-[#1C1B18] px-4 py-2 text-xs font-medium min-h-[38px]"
+                    className="rounded-lg bg-[#1C1B18] dark:bg-[#F2EFE9] text-white dark:text-[#1C1B18] px-4 py-2 text-xs font-medium min-h-[44px] md:min-h-[38px] disabled:opacity-60"
                   >
                     {savingId === a.id ? 'Đang lưu...' : 'Lưu cài đặt'}
                   </button>
@@ -656,7 +675,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
         )}
 
         <div className="pt-3 border-t border-[#E7E5E0] dark:border-[#32302B] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={() =>
@@ -676,7 +695,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                   ]),
                 )
               }
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[38px]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[44px] lg:min-h-[38px]"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Xuất CSV Nhật ký</span>
@@ -702,7 +721,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                   ]),
                 )
               }
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[38px]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[44px] lg:min-h-[38px]"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Xuất CSV Nghiên cứu giá</span>
@@ -710,7 +729,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
 
             <a
               href="/api/export/json"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[38px]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-3 py-2 text-xs font-medium hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925] min-h-[44px] lg:min-h-[38px]"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Sao lưu JSON</span>
@@ -720,7 +739,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       </div>
 
       {/* 3. Sync History */}
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <h3 className="text-sm font-semibold">
             Lịch sử nhập báo cáo ({dataset.imports.length}) & Nhật ký đồng bộ ({visibleLogs.length})
@@ -738,6 +757,53 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           )}
         </div>
 
+        {isMobile ? (
+          visibleLogs.length === 0 ? (
+            <p className="py-6 text-center text-xs text-[#55534D] dark:text-[#C2BFB6]">Chưa có lịch sử đồng bộ nào.</p>
+          ) : (
+            <ul className="divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70">
+              {logPagination.pageItems.map((l) => {
+                const meta = LOG_STATUS_META[l.status] ?? { label: l.status, className: '' };
+                return (
+                  <li key={l.id}>
+                    <button
+                      type="button"
+                      onClick={() => setLogDetail(l)}
+                      aria-haspopup="dialog"
+                      className="press flex w-full items-start gap-3 py-3 text-left"
+                    >
+                      <span
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LOG_STATUS_DOT[l.status] ?? 'bg-[#8A877E]'}`}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-sm font-bold">
+                            {LOG_SOURCE_LABELS[l.source] ?? l.source}
+                            {l.accountNumber ? ` · TK ${l.accountNumber}` : ''}
+                          </span>
+                          <span className="shrink-0 font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+                            {new Date(l.createdAt).toLocaleString('vi-VN', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </span>
+                        <span className={`block text-xs font-semibold ${meta.className}`}>{meta.label}</span>
+                        <span className="mt-0.5 line-clamp-2 block text-xs text-[#55534D] dark:text-[#C2BFB6]">
+                          {l.message}
+                        </span>
+                      </span>
+                      <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-[#55534D] dark:text-[#C2BFB6]" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : (
         <div className="overflow-x-auto">
           {/* Mã, thời điểm và ghi chú là chữ/định danh nên căn trái; tiêu đề cùng hướng với ô */}
           <table className="w-full min-w-[860px] table-fixed text-left text-xs">
@@ -788,6 +854,8 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           </table>
         </div>
 
+        )}
+
         <Pagination
           page={logPagination.page}
           totalPages={logPagination.totalPages}
@@ -797,6 +865,36 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           unit="bản ghi"
         />
       </div>
+
+      {/* Panel chi tiết một dòng nhật ký đồng bộ (điện thoại) */}
+      {isMobile && logDetail && (
+        <BottomSheet
+          open
+          onClose={() => setLogDetail(null)}
+          title="Chi tiết đồng bộ"
+          subtitle={new Date(logDetail.createdAt).toLocaleString('vi-VN')}
+        >
+          <div className="space-y-3 pt-1">
+            <StatGrid
+              items={[
+                { label: 'Nguồn', value: LOG_SOURCE_LABELS[logDetail.source] ?? logDetail.source },
+                { label: 'Tài khoản', value: logDetail.accountNumber ?? '—' },
+                { label: 'Báo cáo gốc', value: logDetail.reportTimestampRaw ?? '—', wide: true },
+                {
+                  label: 'Trạng thái',
+                  value: (LOG_STATUS_META[logDetail.status] ?? { label: logDetail.status }).label,
+                  valueClassName: (LOG_STATUS_META[logDetail.status] ?? { className: '' }).className,
+                },
+                { label: 'Orders / Deals', value: `${logDetail.ordersCount} / ${logDetail.dealsCount}` },
+              ]}
+            />
+            <div className="rounded-2xl border border-[#E7E5E0] bg-[#FAF9F5] p-3.5 dark:border-[#32302B] dark:bg-[#181715]">
+              <p className="text-[11px] font-bold text-[#55534D] dark:text-[#C2BFB6]">Ghi chú</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{logDetail.message}</p>
+            </div>
+          </div>
+        </BottomSheet>
+      )}
     </div>
   );
 };

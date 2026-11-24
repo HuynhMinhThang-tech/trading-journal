@@ -9,8 +9,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronRight } from 'lucide-react';
+import { BottomSheet } from './ui/BottomSheet.tsx';
+import { SegmentedControl } from './ui/controls.tsx';
 import { useIsDark } from '../hooks/useIsDark.ts';
+import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { chartColors, chartTooltipProps } from '../lib/pnl.ts';
 import type { MetricsSummary } from '../shared/types.ts';
 
@@ -27,11 +30,42 @@ function formatMoney(val: string | number | null): string {
   return `${sign}$${Math.abs(num).toFixed(2)}`;
 }
 
+const PREVIEW_ROWS = 6;
+
+interface MetricListRowProps {
+  label: React.ReactNode;
+  trades: number;
+  winRate: number;
+  netPL: string;
+  mono?: boolean;
+}
+
+/** Một dòng của bảng số liệu, dạng danh sách cho điện thoại (không phải kéo ngang). */
+const MetricListRow: React.FC<MetricListRowProps> = ({ label, trades, winRate, netPL, mono = false }) => (
+  <li className="flex items-center justify-between gap-3 py-3">
+    <div className="min-w-0">
+      <p className={`text-sm font-semibold ${mono ? 'font-mono-num' : ''}`}>{label}</p>
+      <p className="mt-0.5 font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+        n={trades} · Win {winRate}%
+      </p>
+    </div>
+    <span
+      className={`shrink-0 font-mono-num text-sm font-bold ${Number(netPL) >= 0 ? 'text-win' : 'text-loss'}`}
+    >
+      {formatMoney(netPL)}
+    </span>
+  </li>
+);
+
+const LIST_CLASS = 'divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70';
+
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   metrics,
   onNavigateSettings,
 }) => {
   const [timeScale, setTimeScale] = useState<'day' | 'week' | 'month'>('day');
+  const [showAllPeriods, setShowAllPeriods] = useState(false);
+  const isMobile = useIsMobile();
   const isDark = useIsDark();
   const colors = chartColors(isDark);
   const axisTick = { fontSize: 11, fill: colors.axis };
@@ -65,14 +99,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             netPL: m.netPL,
           }));
 
+  // Điện thoại: mới nhất lên đầu, chỉ hiện vài dòng đầu, phần còn lại mở trong panel
+  const recentRows = [...timeSeriesRows].reverse();
+  const scaleLabel = timeScale === 'day' ? 'ngày' : timeScale === 'week' ? 'tuần' : 'tháng';
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 lg:space-y-5">
       {/* Core Quantitative Grid (Complementary to Overview) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        <div className="col-span-2 lg:col-span-1 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Kỳ vọng toán học (Expectancy)</p>
           <p
-            className={`mt-1.5 text-xl font-semibold font-mono-num ${
+            className={`mt-1.5 text-lg lg:text-xl font-semibold font-mono-num ${
               metrics.expectancy !== null && Number(metrics.expectancy) > 0
                 ? 'text-win'
                 : metrics.expectancy !== null && Number(metrics.expectancy) < 0
@@ -87,9 +125,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </p>
         </div>
 
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
+        <div className="col-span-2 lg:col-span-1 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Lãi TB / Lỗ TB mỗi lệnh</p>
-          <p className="mt-1.5 text-xl font-semibold font-mono-num">
+          <p className="mt-1.5 text-lg lg:text-xl font-semibold font-mono-num">
             <span className="text-win">
               {metrics.averageWin ? `+$${metrics.averageWin}` : '—'}
             </span>
@@ -102,7 +140,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Chuỗi thắng / thua tối đa</p>
-          <p className="mt-1.5 text-xl font-semibold font-mono-num">
+          <p className="mt-1.5 text-lg lg:text-xl font-semibold font-mono-num">
             {metrics.maxConsecutiveWins} / {metrics.maxConsecutiveLosses}
           </p>
           <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
@@ -112,7 +150,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4">
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Phí & Swap lũy kế</p>
-          <p className="mt-1.5 text-xl font-semibold font-mono-num">
+          <p className="mt-1.5 text-lg lg:text-xl font-semibold font-mono-num">
             {formatMoney(Number(metrics.totalCommission) + Number(metrics.totalSwap))}
           </p>
           <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
@@ -123,22 +161,25 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       {/* Buy vs Sell Side Comparison */}
       {metrics.bySide.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3 lg:gap-4">
           {metrics.bySide.map((s) => (
             <div
               key={s.side}
-              className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-5 py-3.5 flex items-center justify-between gap-4"
+              className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-4 py-3.5 lg:px-5 flex flex-col lg:flex-row lg:items-center justify-between gap-1.5 lg:gap-4"
             >
               <div>
                 <p className="text-xs font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-                  {s.side === 'BUY' ? 'Hiệu suất chiều MUA (Buy)' : 'Hiệu suất chiều BÁN (Sell)'}
+                  <span className="lg:hidden">{s.side === 'BUY' ? 'Chiều MUA' : 'Chiều BÁN'}</span>
+                  <span className="hidden lg:inline">
+                    {s.side === 'BUY' ? 'Hiệu suất chiều MUA (Buy)' : 'Hiệu suất chiều BÁN (Sell)'}
+                  </span>
                 </p>
                 <p className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6] mt-0.5">
-                  n={s.trades} lệnh · Thắng {s.wins} · Win Rate {s.winRate}%
+                  n={s.trades} · Thắng {s.wins} · {s.winRate}%
                 </p>
               </div>
               <span
-                className={`text-base font-mono-num font-semibold ${
+                className={`text-base font-mono-num font-bold ${
                   Number(s.netPL) > 0
                     ? 'text-win'
                     : Number(s.netPL) < 0
@@ -154,8 +195,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       )}
 
       {/* Charts: P/L by Symbol + Win/Loss Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-4">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-4">Net P/L theo Mã giao dịch</h3>
           <div className="h-56 w-full">
             {symbolChartData.length > 0 ? (
@@ -185,7 +226,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* Win/Loss Distribution */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-4">Phân bố mức Lãi / Lỗ (Win/Loss Distribution)</h3>
           <div className="h-56 w-full">
             {metrics.closedTrades > 0 ? (
@@ -216,26 +257,62 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* Time Comparison: Day / Week / Month + Holding Time Analysis */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h3 className="text-sm font-semibold">Hiệu suất theo Ngày / Tuần / Tháng</h3>
-            <select
-              value={timeScale}
-              onChange={(e) => setTimeScale(e.target.value as 'day' | 'week' | 'month')}
-              aria-label="Chu kỳ thời gian"
-              className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-1.5 text-xs font-medium min-h-[34px]"
-            >
-              <option value="day">Theo ngày</option>
-              <option value="week">Theo tuần</option>
-              <option value="month">Theo tháng</option>
-            </select>
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-4">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
+          <h3 className="text-sm font-semibold mb-3">Hiệu suất theo Ngày / Tuần / Tháng</h3>
+          <SegmentedControl
+            ariaLabel="Chu kỳ thời gian"
+            value={timeScale}
+            onChange={(v) => setTimeScale(v)}
+            className="mb-3"
+            options={[
+              { id: 'day', label: 'Ngày' },
+              { id: 'week', label: 'Tuần' },
+              { id: 'month', label: 'Tháng' },
+            ]}
+          />
 
-          <div className="overflow-x-auto">
+          {isMobile ? (
+            <>
+              {timeSeriesRows.length === 0 ? (
+                <p className="py-6 text-center text-xs text-[#55534D] dark:text-[#C2BFB6]">
+                  Chưa có dữ liệu theo thời gian.
+                </p>
+              ) : (
+                <ul className={LIST_CLASS}>
+                  {recentRows.slice(0, PREVIEW_ROWS).map((r) => (
+                    <MetricListRow key={r.label} label={r.label} trades={r.trades} winRate={r.winRate} netPL={r.netPL} mono />
+                  ))}
+                </ul>
+              )}
+              {recentRows.length > PREVIEW_ROWS && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllPeriods(true)}
+                  className="press mt-2 flex min-h-[46px] w-full items-center justify-center gap-1 rounded-xl border border-[#E7E5E0] bg-[#FAF9F5] text-sm font-semibold dark:border-[#32302B] dark:bg-[#181715]"
+                >
+                  Xem tất cả {recentRows.length} {scaleLabel}
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              )}
+              <BottomSheet
+                open={showAllPeriods}
+                onClose={() => setShowAllPeriods(false)}
+                title={`Hiệu suất theo ${scaleLabel}`}
+                subtitle={`${recentRows.length} mục · mới nhất trước`}
+              >
+                <ul className={LIST_CLASS}>
+                  {recentRows.map((r) => (
+                    <MetricListRow key={r.label} label={r.label} trades={r.trades} winRate={r.winRate} netPL={r.netPL} mono />
+                  ))}
+                </ul>
+              </BottomSheet>
+            </>
+          ) : (
+          <div className="max-h-[420px] overflow-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6]">
+                <tr className="border-b border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6] [&_th]:sticky [&_th]:top-0 [&_th]:bg-white dark:[&_th]:bg-[#22211E]">
                   <th className="py-2 font-medium">Khoảng thời gian</th>
                   <th className="py-2 font-medium text-right">Mẫu (n)</th>
                   <th className="py-2 font-medium text-right">Win Rate</th>
@@ -269,14 +346,28 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </tbody>
             </table>
           </div>
+          )}
         </div>
 
         {/* Holding Time Analysis */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-1">Phân tích thời gian giữ lệnh (Holding Time)</h3>
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6] mb-3">
             Trung bình toàn bộ: {metrics.avgHoldingMinutes ?? '—'} phút · Thắng: {metrics.avgWinHoldingMinutes ?? '—'}p · Thua: {metrics.avgLossHoldingMinutes ?? '—'}p
           </p>
+          {isMobile ? (
+            metrics.holdingTimeBuckets.length === 0 ? (
+              <p className="py-6 text-center text-xs text-[#55534D] dark:text-[#C2BFB6]">
+                Chưa có dữ liệu thời gian giữ lệnh.
+              </p>
+            ) : (
+              <ul className={LIST_CLASS}>
+                {metrics.holdingTimeBuckets.map((b) => (
+                  <MetricListRow key={b.bucket} label={b.bucket} trades={b.trades} winRate={b.winRate} netPL={b.netPL} />
+                ))}
+              </ul>
+            )
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
@@ -314,13 +405,14 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </tbody>
             </table>
           </div>
+          )}
         </div>
       </div>
 
       {/* Session Analysis + Strategy + Mistake Tags */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-4">
         {/* Session Breakdown */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-1">Hiệu suất theo Phiên (Á / Âu / Mỹ)</h3>
           {!metrics.sessionAnalysisAvailable ? (
             <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/25 p-3 text-xs space-y-2">
@@ -370,7 +462,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* By Strategy */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-3">Theo Chiến lược / Setup</h3>
           <div className="space-y-2 text-xs">
             {metrics.byStrategy.map((s) => (
@@ -402,7 +494,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* By Mistake Tags */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-3">Chi phí theo Thẻ lỗi sai</h3>
           <div className="space-y-2 text-xs">
             {metrics.byMistakeTag.map((m) => (
@@ -433,7 +525,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* Explicit Data Limitations Dictionary */}
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
         <h3 className="text-sm font-semibold mb-3">Chỉ số nâng cao</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs leading-relaxed text-[#55534D] dark:text-[#C2BFB6]">
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">

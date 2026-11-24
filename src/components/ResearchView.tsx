@@ -1,8 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Edit3, List, Plus, Search, Star, Trash2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { CalendarDays, Edit3, Image as ImageIcon, List, Plus, SearchX, Star, Tag, Trash2, X } from 'lucide-react';
 import { ImageGallery, ThumbStrip, handleImagePaste, type GalleryItem } from './ImageGallery.tsx';
 import { MonthCalendar } from './MonthCalendar.tsx';
 import { Pagination } from './Pagination.tsx';
+import { BottomSheet } from './ui/BottomSheet.tsx';
+import {
+  BTN_DANGER,
+  BTN_PRIMARY,
+  BTN_SECONDARY,
+  CARD,
+  Chip,
+  ChipScroller,
+  FIELD_BASE,
+  SearchField,
+  SegmentedControl,
+  SelectField,
+} from './ui/controls.tsx';
+import { StatGrid } from './ui/StatGrid.tsx';
+import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { usePagination } from '../hooks/usePagination.ts';
 import {
   ImageUploadError,
@@ -41,6 +57,24 @@ interface PendingImage {
   previewUrl: string;
 }
 
+const OBSERVATION_FORM_ID = 'observation-form';
+
+const Stars: React.FC<{ value: number }> = ({ value }) => (
+  <span className="inline-flex items-center gap-0.5 text-[#C96442] dark:text-[#D97757]" role="img" aria-label={`Độ tin cậy ${value} trên 5`}>
+    {[1, 2, 3, 4, 5].map((n) => (
+      <Star key={n} className={`h-3.5 w-3.5 ${n <= value ? 'fill-current' : 'opacity-30'}`} />
+    ))}
+  </span>
+);
+
+const TextBlock: React.FC<{ label: string; value: string }> = ({ label, value }) =>
+  value ? (
+    <div className="rounded-2xl border border-[#E7E5E0] bg-[#FAF9F5] p-3.5 dark:border-[#32302B] dark:bg-[#181715]">
+      <p className="text-[11px] font-bold text-[#55534D] dark:text-[#C2BFB6]">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{value}</p>
+    </div>
+  ) : null;
+
 export const ResearchView: React.FC<ResearchViewProps> = ({
   observations,
   attachments,
@@ -60,6 +94,12 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   const [calMonth, setCalMonth] = useState(initialNow.getMonth());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayFilter, setDayFilter] = useState<string | null>(null);
+
+  const isMobile = useIsMobile();
+  // Điện thoại: quan sát đang mở trong panel chi tiết, và bước xác nhận xóa
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -335,7 +375,428 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     }
   };
 
-  return (
+  // ---------------------------------------------------------------------------------------------
+  // Form thêm / sửa quan sát: panel trượt từ đáy (điện thoại) hoặc hộp thoại (máy tính)
+  // ---------------------------------------------------------------------------------------------
+  const labelClass = 'block text-xs font-semibold mb-1.5';
+  const formSheet = (
+    <BottomSheet
+      open={modalOpen}
+      onClose={closeModal}
+      wide
+      title={editingId ? 'Cập nhật quan sát hành động giá' : 'Ghi nhận quan sát hành động giá'}
+      footer={
+        <div className="flex gap-3">
+          <button type="button" onClick={closeModal} className={`${BTN_SECONDARY} flex-1`}>
+            Hủy
+          </button>
+          <button type="submit" form={OBSERVATION_FORM_ID} disabled={saving} className={`${BTN_PRIMARY} flex-[2]`}>
+            {saving ? 'Đang lưu...' : editingId ? 'Lưu cập nhật' : 'Lưu quan sát'}
+          </button>
+        </div>
+      }
+    >
+      <form
+        id={OBSERVATION_FORM_ID}
+        onSubmit={handleSubmit}
+        onPaste={(e) => handleImagePaste(e, (files) => void addFormImages(files))}
+        className="space-y-4 pt-1"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>Mã quan sát *</label>
+            <input type="text" required value={symbol} onChange={(e) => setSymbol(e.target.value)} className={FIELD_BASE} />
+          </div>
+          <div>
+            <label className={labelClass}>Ngày *</label>
+            <input
+              type="date"
+              required
+              value={observedDate}
+              onChange={(e) => setObservedDate(e.target.value)}
+              className={`${FIELD_BASE} font-mono-num`}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Độ tin cậy quan sát (1–5)</label>
+          <div className="flex items-center gap-2">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setConfidence(n)}
+                aria-pressed={confidence === n}
+                className={`press min-h-[44px] flex-1 rounded-xl border text-sm font-mono-num font-bold transition-colors ${
+                  confidence >= n
+                    ? 'bg-[#C96442] border-[#C96442] text-white'
+                    : 'border-[#E7E5E0] dark:border-[#32302B] text-[#55534D] dark:text-[#C2BFB6]'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Hành động giá quan sát được *</label>
+          <input type="text" required value={priceAction} onChange={(e) => setPriceAction(e.target.value)} className={FIELD_BASE} />
+        </div>
+
+        <div>
+          <label className={labelClass}>Đặc điểm cây nến *</label>
+          <input type="text" required value={candlePattern} onChange={(e) => setCandlePattern(e.target.value)} className={FIELD_BASE} />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>Bối cảnh thị trường & Tin tức</label>
+            <input type="text" value={marketContext} onChange={(e) => setMarketContext(e.target.value)} className={FIELD_BASE} />
+          </div>
+          <div>
+            <label className={labelClass}>Nhãn thói quen giá (để gom nhóm)</label>
+            <input type="text" value={habitTag} onChange={(e) => setHabitTag(e.target.value)} className={FIELD_BASE} />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Diễn biến sau đó / Kết luận rút ra</label>
+          <textarea
+            rows={3}
+            value={outcomeNote}
+            onChange={(e) => setOutcomeNote(e.target.value)}
+            className={`${FIELD_BASE} py-3 leading-relaxed`}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Hình ảnh</label>
+          <ImageGallery
+            items={galleryItems}
+            onAddFiles={(files) => void addFormImages(files)}
+            onRemove={removeFormImage}
+            busy={imageBusy}
+            error={imageError}
+            disabled={saving}
+          />
+        </div>
+      </form>
+    </BottomSheet>
+  );
+
+  // ---------------------------------------------------------------------------------------------
+  // Điện thoại
+  // ---------------------------------------------------------------------------------------------
+  const closeDetail = () => {
+    setDetailId(null);
+    setConfirmDelete(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    try {
+      await onDelete(id);
+      closeDetail();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const openFromDay = (iso: string) => {
+    setSelectedDay(iso);
+  };
+
+  const renderObservationCard = (o: PriceObservation) => {
+    const imageCount = imagesByObservation.get(o.id)?.length ?? 0;
+    return (
+      <button
+        key={o.id}
+        type="button"
+        onClick={() => setDetailId(o.id)}
+        aria-haspopup="dialog"
+        className={`${CARD} press block w-full p-4 text-left active:bg-[#F3F1EC] dark:active:bg-[#2A2925]`}
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-sm font-bold">{o.symbol}</span>
+            <span className="shrink-0 font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+              {formatIsoDisplay(o.observedDate)}
+            </span>
+          </span>
+          <Stars value={o.confidence} />
+        </span>
+
+        <span className="mt-2 line-clamp-2 block text-sm font-semibold leading-snug">{o.priceAction}</span>
+        {o.candlePattern && (
+          <span className="mt-1 line-clamp-1 block text-xs text-[#55534D] dark:text-[#C2BFB6]">{o.candlePattern}</span>
+        )}
+
+        {(o.habitTag || imageCount > 0) && (
+          <span className="mt-2.5 flex items-center gap-2">
+            {o.habitTag && (
+              <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-[#C96442]/10 px-2.5 py-1 text-[11px] font-bold text-[#B55535] dark:bg-[#D97757]/15 dark:text-[#E8987D]">
+                <Tag className="h-3 w-3 shrink-0" />
+                <span className="truncate">{o.habitTag}</span>
+              </span>
+            )}
+            {imageCount > 0 && (
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-mono-num text-[11px] font-semibold text-[#55534D] dark:text-[#C2BFB6]">
+                <ImageIcon className="h-3.5 w-3.5" />
+                {imageCount}
+              </span>
+            )}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const detailObs = detailId ? (observations.find((o) => o.id === detailId) ?? null) : null;
+  const detailSheet = detailObs && (
+    <BottomSheet
+      open
+      onClose={closeDetail}
+      ariaLabel={`Chi tiết quan sát ${detailObs.symbol}`}
+      title={detailObs.symbol}
+      subtitle={formatIsoDisplay(detailObs.observedDate)}
+      footer={
+        confirmDelete ? (
+          <div>
+            <p className="mb-2.5 text-center text-sm font-semibold">Xóa quan sát này? Ảnh đính kèm cũng sẽ bị xóa.</p>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setConfirmDelete(false)} className={`${BTN_SECONDARY} flex-1`}>
+                Giữ lại
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void handleDelete(detailObs.id)}
+                className={`${BTN_DANGER} flex-1 !bg-[color:var(--pnl-loss-soft)]`}
+              >
+                <Trash2 className="h-4 w-4" />
+                {deleting ? 'Đang xóa...' : 'Xóa'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-3">
+            <button type="button" onClick={() => setConfirmDelete(true)} className={BTN_DANGER} aria-label="Xóa quan sát">
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => openEditModal(detailObs)} className={`${BTN_PRIMARY} flex-1`}>
+              <Edit3 className="h-4 w-4" />
+              Chỉnh sửa
+            </button>
+          </div>
+        )
+      }
+    >
+      <div className="space-y-3 pt-1">
+        <StatGrid
+          items={[
+            { label: 'Độ tin cậy', value: <Stars value={detailObs.confidence} /> },
+            { label: 'Nhãn thói quen', value: detailObs.habitTag || '—' },
+          ]}
+        />
+        <TextBlock label="Hành động giá" value={detailObs.priceAction} />
+        <TextBlock label="Đặc điểm nến" value={detailObs.candlePattern} />
+        <TextBlock label="Bối cảnh & Tin tức" value={detailObs.marketContext} />
+        <TextBlock label="Diễn biến sau đó / Kết luận" value={detailObs.outcomeNote} />
+        {(imagesByObservation.get(detailObs.id)?.length ?? 0) > 0 && (
+          <div>
+            <h3 className="mb-0.5 mt-4 text-xs font-bold text-[#55534D] dark:text-[#C2BFB6]">Hình ảnh</h3>
+            <ThumbStrip items={thumbsFor(detailObs.id)} maxVisible={8} />
+          </div>
+        )}
+      </div>
+    </BottomSheet>
+  );
+
+  // Lịch: chạm vào một ngày -> panel liệt kê các quan sát của ngày đó
+  const daySheet = isMobile && viewMode === 'calendar' && selectedDay && (
+    <BottomSheet
+      open
+      onClose={() => setSelectedDay(null)}
+      ariaLabel={`Quan sát ngày ${formatIsoDisplay(selectedDay)}`}
+      title={`Ngày ${formatIsoDisplay(selectedDay)}`}
+      subtitle={`${selectedDayItems.length} quan sát`}
+      footer={
+        <div className="flex gap-3">
+          {selectedDayItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setDayFilter(selectedDay);
+                setSelectedDay(null);
+                setViewMode('list');
+              }}
+              className={`${BTN_SECONDARY} flex-1`}
+            >
+              <List className="h-4 w-4" />
+              Xem danh sách
+            </button>
+          )}
+          <button type="button" onClick={() => openNewModal(selectedDay)} className={`${BTN_PRIMARY} flex-1`}>
+            <Plus className="h-4 w-4" />
+            Ghi nhận
+          </button>
+        </div>
+      }
+    >
+      {selectedDayItems.length === 0 ? (
+        <p className="py-8 text-center text-sm text-[#55534D] dark:text-[#C2BFB6]">
+          Chưa có quan sát nào trong ngày này.
+        </p>
+      ) : (
+        <div className="space-y-3 pt-1">{selectedDayItems.map(renderObservationCard)}</div>
+      )}
+    </BottomSheet>
+  );
+
+  const addButtonTarget = viewMode === 'calendar' && selectedDay ? selectedDay : undefined;
+
+  const mobileView = (
+    <div className="space-y-3.5 pb-20">
+      <SegmentedControl
+        ariaLabel="Chế độ xem"
+        value={viewMode}
+        onChange={setViewMode}
+        options={[
+          { id: 'list', label: 'Danh sách', icon: <List className="h-3.5 w-3.5" /> },
+          { id: 'calendar', label: 'Lịch', icon: <CalendarDays className="h-3.5 w-3.5" /> },
+        ]}
+      />
+
+      <div data-no-swipe className="space-y-2.5">
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder="Tìm hành động giá, nến, thói quen"
+          ariaLabel="Tìm trong sổ nghiên cứu"
+        />
+        <ChipScroller>
+          {viewMode === 'list' && dayFilter && (
+            <Chip active onClick={() => setDayFilter(null)} icon={<CalendarDays className="h-3.5 w-3.5" />} className="font-mono-num">
+              {formatIsoDisplay(dayFilter)}
+              <X className="h-3.5 w-3.5" aria-label="Bỏ lọc theo ngày" />
+            </Chip>
+          )}
+          {symbols.map((sym) => (
+            <Chip key={sym} active={symbolFilter === sym} onClick={() => setSymbolFilter(sym)}>
+              {sym === 'ALL' ? 'Tất cả mã' : sym}
+            </Chip>
+          ))}
+        </ChipScroller>
+      </div>
+
+      {viewMode === 'list' ? (
+        <>
+          {habitSummary.length > 0 && (
+            <section aria-label="Thói quen giá nổi bật">
+              <div className="mb-2 flex items-baseline justify-between px-1">
+                <h3 className="text-xs font-bold">Thói quen nổi bật</h3>
+                <span className="font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+                  từ {filtered.length} quan sát
+                </span>
+              </div>
+              <div
+                data-no-swipe
+                className="no-scrollbar -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-2.5 overflow-x-auto px-4 sm:-mx-6 sm:scroll-px-6 sm:px-6"
+              >
+                {habitSummary.map((h) => (
+                  <div key={h.key} className={`${CARD} w-[210px] shrink-0 snap-start p-3.5`}>
+                    <div className="flex items-center justify-between text-xs">
+                      <strong>{h.symbol}</strong>
+                      <span className="font-mono-num font-bold text-[#C96442] dark:text-[#D97757]">{h.count} lần</span>
+                    </div>
+                    <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug">{h.habit}</p>
+                    <p className="mt-1 font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+                      Tin cậy TB {(h.totalConf / h.count).toFixed(1)}/5
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <p className="px-1 text-xs font-semibold text-[#55534D] dark:text-[#C2BFB6]">
+            <span className="font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]">{filtered.length}</span> quan sát
+          </p>
+
+          {filtered.length === 0 ? (
+            <div className={`${CARD} flex flex-col items-center px-6 py-12 text-center`}>
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F3F1EC] text-[#55534D] dark:bg-[#181715] dark:text-[#C2BFB6]">
+                <SearchX className="h-5 w-5" />
+              </span>
+              <p className="mt-3 text-sm font-bold">Chưa có quan sát nào</p>
+              <p className="mt-1 text-xs text-[#55534D] dark:text-[#C2BFB6]">Bấm nút + để ghi nhận quan sát đầu tiên.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">{pagination.pageItems.map(renderObservationCard)}</div>
+          )}
+
+          <Pagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            unit="quan sát"
+          />
+        </>
+      ) : (
+        <div className={`${CARD} p-3.5`}>
+          <MonthCalendar
+            year={calYear}
+            month={calMonth}
+            onMonthChange={(y, m) => {
+              setCalYear(y);
+              setCalMonth(m);
+            }}
+            summary={
+              <span className="text-[#55534D] dark:text-[#C2BFB6]">{monthObservationCount} quan sát</span>
+            }
+            selectedIso={selectedDay}
+            onDayClick={openFromDay}
+            getTone={(iso) => (byDay.has(iso) ? 'accent' : null)}
+            renderDay={(iso) => {
+              const items = byDay.get(iso);
+              if (!items || items.length === 0) return null;
+              return (
+                <span className="mt-auto font-mono-num text-xs font-bold text-[#C96442] dark:text-[#D97757]">
+                  {items.length}
+                </span>
+              );
+            }}
+          />
+          <p className="mt-3 text-center text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
+            Chạm vào một ngày để xem hoặc ghi nhận quan sát
+          </p>
+        </div>
+      )}
+
+      {/* Nút nổi "Ghi nhận" (đưa ra <body> để luôn cố định theo màn hình) */}
+      {createPortal(
+        <button
+          type="button"
+          onClick={() => openNewModal(addButtonTarget)}
+          aria-label="Ghi nhận quan sát mới"
+          className="press fixed right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#C96442] text-white shadow-lg shadow-black/25 active:bg-[#A24D2F] bottom-[calc(5rem+env(safe-area-inset-bottom))]"
+        >
+          <Plus className="h-6 w-6" />
+        </button>,
+        document.body,
+      )}
+
+      {detailSheet}
+      {daySheet}
+      {formSheet}
+    </div>
+  );
+
+  const desktopView = (
     <div className="space-y-5">
       {/* Header & Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
@@ -424,42 +885,35 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       {/* Filter Bar */}
       <div
         data-no-swipe
-        className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4"
+        className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-3"
       >
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-[#55534D] absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Lọc theo hành động giá, nến, tin tức, thẻ thói quen..."
-            className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#C96442]"
-          />
-        </div>
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder="Lọc theo hành động giá, nến, tin tức, thẻ thói quen"
+          className="flex-1 max-w-md"
+        />
 
         <div className="flex flex-wrap items-center gap-2">
           {viewMode === 'list' && dayFilter && (
-            <button
-              type="button"
-              onClick={() => setDayFilter(null)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#C96442]/50 bg-[#C96442]/10 px-3 py-2 text-xs font-medium min-h-[40px]"
-              aria-label="Bỏ lọc theo ngày"
-            >
-              <span className="font-mono-num">Ngày {formatIsoDisplay(dayFilter)}</span>
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <Chip active onClick={() => setDayFilter(null)} icon={<CalendarDays className="h-3.5 w-3.5" />} className="font-mono-num">
+              {formatIsoDisplay(dayFilter)}
+              <X className="h-3.5 w-3.5" aria-label="Bỏ lọc theo ngày" />
+            </Chip>
           )}
-          <select
+          <SelectField
+            compact
+            wrapperClassName="w-[170px]"
             value={symbolFilter}
             onChange={(e) => setSymbolFilter(e.target.value)}
-            className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-xs font-medium min-h-[40px]"
+            aria-label="Mã"
           >
             {symbols.map((s) => (
               <option key={s} value={s}>
                 {s === 'ALL' ? 'Tất cả mã' : s}
               </option>
             ))}
-          </select>
+          </SelectField>
         </div>
       </div>
 
@@ -560,60 +1014,6 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Mobile Cards */}
-      <div className="lg:hidden space-y-3">
-        {pagination.pageItems.map((o) => (
-          <div
-            key={o.id}
-            className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 space-y-2"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold">
-                {o.symbol}
-              </div>
-              <div className="flex items-center gap-1 text-xs font-mono-num text-[#C96442]">
-                <Star className="w-3.5 h-3.5 fill-current" />
-                <span>{o.confidence}/5</span>
-              </div>
-            </div>
-            <div className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-              {o.observedDate}
-            </div>
-            <div className="text-sm font-medium">{o.priceAction}</div>
-            <ThumbStrip items={thumbsFor(o.id)} />
-            <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
-              <strong>Nến:</strong> {o.candlePattern}
-            </div>
-            {o.marketContext && (
-              <div className="text-xs text-[#55534D] dark:text-[#C2BFB6]">
-                <strong>Bối cảnh:</strong> {o.marketContext}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E7E5E0]/70 dark:border-[#32302B]/70">
-              <button
-                type="button"
-                onClick={() => openEditModal(o)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-[#E7E5E0] dark:border-[#32302B] min-h-[38px]"
-              >
-                Chỉnh sửa
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete(o.id)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg text-loss border border-[#E7E5E0] dark:border-[#32302B] min-h-[38px]"
-              >
-                Xóa
-              </button>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-8 text-center text-sm text-[#55534D]">
-            Chưa có bản ghi quan sát nào.
-          </div>
-        )}
       </div>
 
       <Pagination
@@ -760,157 +1160,9 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs p-0 sm:p-4">
-          <div className="w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 sm:p-6 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E7E5E0] dark:border-[#32302B]">
-              <h3 className="text-base font-semibold">
-                {editingId ? 'Cập nhật quan sát hành động giá' : 'Ghi nhận quan sát hành động giá'}
-              </h3>
-              <button
-                type="button"
-                onClick={closeModal}
-                aria-label="Đóng"
-                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleSubmit}
-              onPaste={(e) => handleImagePaste(e, (files) => void addFormImages(files))}
-              className="mt-4 space-y-4"
-            >
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">Mã quan sát *</label>
-                  <input
-                    type="text"
-                    required
-                    value={symbol}
-                    onChange={(e) => setSymbol(e.target.value)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Ngày *</label>
-                  <input
-                    type="date"
-                    required
-                    value={observedDate}
-                    onChange={(e) => setObservedDate(e.target.value)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm font-mono-num"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">Độ tin cậy quan sát (1–5)</label>
-                <div className="flex items-center gap-1.5 pt-1">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setConfidence(n)}
-                      className={`min-h-[38px] min-w-[38px] rounded-lg border text-xs font-mono-num font-semibold transition-colors ${
-                        confidence >= n
-                          ? 'bg-[#C96442] border-[#C96442] text-white'
-                          : 'border-[#E7E5E0] dark:border-[#32302B] text-[#55534D]'
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">Hành động giá quan sát được *</label>
-                <input
-                  type="text"
-                  required
-                  value={priceAction}
-                  onChange={(e) => setPriceAction(e.target.value)}
-                  className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">Đặc điểm cây nến *</label>
-                <input
-                  type="text"
-                  required
-                  value={candlePattern}
-                  onChange={(e) => setCandlePattern(e.target.value)}
-                  className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">Bối cảnh thị trường & Tin tức</label>
-                  <input
-                    type="text"
-                    value={marketContext}
-                    onChange={(e) => setMarketContext(e.target.value)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Nhãn thói quen giá (để gom nhóm)</label>
-                  <input
-                    type="text"
-                    value={habitTag}
-                    onChange={(e) => setHabitTag(e.target.value)}
-                    className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">Diễn biến sau đó / Kết luận rút ra</label>
-                <textarea
-                  rows={2}
-                  value={outcomeNote}
-                  onChange={(e) => setOutcomeNote(e.target.value)}
-                  className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">Hình ảnh</label>
-                <ImageGallery
-                  items={galleryItems}
-                  onAddFiles={(files) => void addFormImages(files)}
-                  onRemove={removeFormImage}
-                  busy={imageBusy}
-                  error={imageError}
-                  disabled={saving}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] px-4 py-2 text-sm font-medium min-h-[42px]"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-[#C96442] px-5 py-2 text-sm font-medium text-white hover:bg-[#B55535] disabled:opacity-50 min-h-[42px]"
-                >
-                  {saving ? 'Đang lưu...' : editingId ? 'Lưu cập nhật' : 'Lưu quan sát'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {formSheet}
     </div>
   );
+
+  return isMobile ? mobileView : desktopView;
 };

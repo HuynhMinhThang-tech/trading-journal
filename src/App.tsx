@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { DiaryView } from './components/DiaryView.tsx';
+import { GlobalFilters, type RangePreset } from './components/GlobalFilters.tsx';
 import { OfflineIndicator } from './components/OfflineIndicator.tsx';
 import { OverviewView } from './components/OverviewView.tsx';
 import { ResearchView } from './components/ResearchView.tsx';
@@ -29,20 +30,7 @@ import type {
 } from './shared/types.ts';
 
 type TabId = 'overview' | 'diary' | 'research' | 'analytics' | 'sync_settings';
-type RangePreset = 'ALL' | '7D' | '30D' | '90D' | 'CUSTOM';
-
-const RANGE_PRESET_OPTIONS: Array<{ id: RangePreset; label: string }> = [
-  { id: 'ALL', label: 'Tất cả thời gian' },
-  { id: '7D', label: '7 ngày gần nhất' },
-  { id: '30D', label: '30 ngày gần nhất' },
-  { id: '90D', label: '90 ngày gần nhất' },
-  { id: 'CUSTOM', label: 'Tùy chọn khoảng ngày' },
-];
-
 const PRESET_DAYS: Record<'7D' | '30D' | '90D', number> = { '7D': 7, '30D': 30, '90D': 90 };
-
-const FILTER_FIELD_CLASS =
-  'rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] px-2.5 py-1.5 text-xs font-medium min-h-[34px]';
 
 const NAV_ITEMS: Array<{
   id: TabId;
@@ -156,6 +144,14 @@ export default function App() {
   const handleDateToChange = (value: string) => {
     setDateTo(value);
     setRangePreset('CUSTOM');
+  };
+
+  const resetFilters = () => {
+    setRangePreset('ALL');
+    setDateFrom('');
+    setDateTo('');
+    setAccountFilter('ALL');
+    setSymbolFilter('ALL');
   };
 
   const isDateInRange = useCallback(
@@ -391,86 +387,34 @@ export default function App() {
         {/* Vùng nội dung cuộn riêng: thanh tab dưới luôn hiện, trang không bị kéo giãn */}
         <div
           ref={scrollRef}
+          data-scroll-root
           {...swipeHandlers}
           className="flex-1 min-h-0 overflow-y-auto overscroll-y-none"
         >
-        {/* Global Shared Query Filter Bar */}
+        {/* Bộ lọc chung (Tổng quan / Nhật ký / Phân tích): thanh gọn ghim đầu trang trên điện thoại */}
         {dataset && showGlobalFilters && dataset.imports.length > 0 && (
-          <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl w-full mx-auto">
-            <div
-              data-no-swipe
-              className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-4 py-2.5 text-xs"
-            >
-              <select
-                value={rangePreset}
-                onChange={(e) => applyRangePreset(e.target.value as RangePreset)}
-                aria-label="Khoảng thời gian"
-                className={FILTER_FIELD_CLASS}
-              >
-                {RANGE_PRESET_OPTIONS.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-
-              <label className="inline-flex items-center gap-1.5 text-[#55534D] dark:text-[#C2BFB6]">
-                <span>Từ</span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  max={dateTo || undefined}
-                  onChange={(e) => handleDateFromChange(e.target.value)}
-                  className={`${FILTER_FIELD_CLASS} font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]`}
-                />
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-[#55534D] dark:text-[#C2BFB6]">
-                <span>đến</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  min={dateFrom || undefined}
-                  onChange={(e) => handleDateToChange(e.target.value)}
-                  className={`${FILTER_FIELD_CLASS} font-mono-num text-[#1C1B18] dark:text-[#F2EFE9]`}
-                />
-              </label>
-
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                <select
-                  value={accountFilter}
-                  onChange={(e) => setAccountFilter(e.target.value)}
-                  aria-label="Tài khoản"
-                  className={FILTER_FIELD_CLASS}
-                >
-                  <option value="ALL">Tất cả tài khoản</option>
-                  {dataset.accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.label} ({a.accountNumber})
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={symbolFilter}
-                  onChange={(e) => setSymbolFilter(e.target.value)}
-                  aria-label="Mã giao dịch"
-                  className={FILTER_FIELD_CLASS}
-                >
-                  {availableSymbols.map((sym) => (
-                    <option key={sym} value={sym}>
-                      {sym === 'ALL' ? 'Mọi mã giao dịch' : sym}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
+          <GlobalFilters
+            rangePreset={rangePreset}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            accountFilter={accountFilter}
+            symbolFilter={symbolFilter}
+            accounts={dataset.accounts}
+            symbols={availableSymbols}
+            resultCount={filteredTrades.length}
+            onPresetChange={applyRangePreset}
+            onDateFromChange={handleDateFromChange}
+            onDateToChange={handleDateToChange}
+            onAccountChange={setAccountFilter}
+            onSymbolChange={setSymbolFilter}
+            onReset={resetFilters}
+          />
         )}
 
         {/* Viewport Content */}
         <main
           key={activeTab}
-          className="animate-tab-in px-4 sm:px-6 lg:px-8 py-5 pb-6 lg:pb-8 max-w-7xl w-full mx-auto"
+          className="animate-tab-in px-4 sm:px-6 lg:px-8 pt-3 pb-8 lg:py-5 lg:pb-8 max-w-7xl w-full mx-auto"
         >
           {loading && !dataset ? (
             <div className="space-y-4">

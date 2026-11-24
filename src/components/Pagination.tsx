@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface PaginationProps {
@@ -36,24 +36,71 @@ export const Pagination: React.FC<PaginationProps> = ({
   onPageChange,
   unit = 'bản ghi',
 }) => {
+  const navRef = useRef<HTMLElement>(null);
+
   if (total <= pageSize) return null;
 
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
 
+  // Trên điện thoại, đổi trang xong thì đưa người dùng về đầu danh sách (thay vì ở lại cuối trang cũ)
+  const goTo = (target: number) => {
+    onPageChange(target);
+    if (window.matchMedia('(max-width: 1023.98px)').matches) {
+      requestAnimationFrame(() => {
+        navRef.current?.closest('[data-scroll-root]')?.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    }
+  };
+
+  const summary = (
+    <p className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+      Hiển thị{' '}
+      <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">
+        {from}–{to}
+      </strong>{' '}
+      / {total} {unit}
+    </p>
+  );
+
   return (
     <nav
+      ref={navRef}
       data-no-swipe
       aria-label="Phân trang"
-      className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs"
+      className="mt-4 text-xs"
     >
-      <p className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-        Hiển thị{' '}
-        <strong className="text-[#1C1B18] dark:text-[#F2EFE9]">
-          {from}–{to}
-        </strong>{' '}
-        / {total} {unit}
-      </p>
+      {/* Điện thoại: Trước · Trang x / y · Sau, nút lớn dễ chạm */}
+      <div className="lg:hidden">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => goTo(page - 1)}
+            disabled={page <= 1}
+            className="press inline-flex min-h-[46px] flex-1 items-center justify-center gap-1 rounded-xl border border-[#E7E5E0] bg-white text-sm font-semibold disabled:opacity-40 dark:border-[#32302B] dark:bg-[#22211E]"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Trước
+          </button>
+          <span className="min-w-[84px] text-center font-mono-num text-sm font-bold">
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => goTo(page + 1)}
+            disabled={page >= totalPages}
+            className="press inline-flex min-h-[46px] flex-1 items-center justify-center gap-1 rounded-xl border border-[#E7E5E0] bg-white text-sm font-semibold disabled:opacity-40 dark:border-[#32302B] dark:bg-[#22211E]"
+          >
+            Sau
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-2 text-center">{summary}</div>
+      </div>
+
+      {/* Máy tính: dãy số trang */}
+      <div className="hidden flex-wrap items-center justify-between gap-3 lg:flex">
+      {summary}
 
       <div className="inline-flex items-center gap-1">
         <button
@@ -98,6 +145,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         >
           <ChevronRight className="w-4 h-4" />
         </button>
+      </div>
       </div>
     </nav>
   );

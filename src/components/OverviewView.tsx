@@ -239,13 +239,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
-      {/* Row 1: KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+    <div className="space-y-4 lg:space-y-5">
+      {/* Row 1: KPI Cards (điện thoại: lưới 2 cột, thẻ Số dư chiếm cả hàng) */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 lg:gap-4">
         {/* KPI 1: Số dư hiện tại */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="col-span-2 lg:col-span-1 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6] truncate">
               Số dư hiện tại
             </span>
             <Wallet className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
@@ -259,15 +259,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
 
         {/* KPI 2: Lãi / lỗ ròng đã chốt */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
-              Lãi / lỗ ròng đã chốt
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6] truncate">
+              <span className="sm:hidden">Lãi / lỗ đã chốt</span>
+              <span className="hidden sm:inline">Lãi / lỗ ròng đã chốt</span>
             </span>
             <CircleDollarSign className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
           <p
-            className={`mt-2.5 text-2xl font-semibold font-mono-num tracking-tight ${
+            className={`mt-2 sm:mt-2.5 text-xl sm:text-2xl font-semibold font-mono-num tracking-tight ${
               pnlTextClass(netPlNum) || 'text-[#1C1B18] dark:text-[#F2EFE9]'
             }`}
           >
@@ -279,14 +280,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
 
         {/* KPI 3: Số giao dịch đã đóng */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
-              Số giao dịch đã đóng
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6] truncate">
+              <span className="sm:hidden">Giao dịch đã đóng</span>
+              <span className="hidden sm:inline">Số giao dịch đã đóng</span>
             </span>
             <ArrowUpRight className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
-          <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
+          <p className="mt-2 sm:mt-2.5 text-xl sm:text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {closedPadded}
           </p>
           <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
@@ -296,14 +298,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
 
         {/* KPI 4: Tỷ lệ thắng */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6] truncate">
               Tỷ lệ thắng
             </span>
             <Target className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
-          <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
+          <p className="mt-2 sm:mt-2.5 text-xl sm:text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : '—'}
           </p>
           <p className="mt-1.5 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
@@ -312,14 +314,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
 
         {/* KPI 5: Hệ số lợi nhuận */}
-        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+        <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6]">
+            <span className="text-xs font-medium text-[#55534D] dark:text-[#C2BFB6] truncate">
               Hệ số lợi nhuận
             </span>
             <Scale className="w-4 h-4 text-[#55534D] dark:text-[#C2BFB6] shrink-0" />
           </div>
-          <p className="mt-2.5 text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
+          <p className="mt-2 sm:mt-2.5 text-xl sm:text-2xl font-semibold font-mono-num tracking-tight text-[#1C1B18] dark:text-[#F2EFE9]">
             {metrics.profitFactorInfinite
               ? '—'
               : metrics.profitFactor !== null
@@ -335,8 +337,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       </div>
 
       {/* Row 2: Diễn biến số dư (7 ngày) + Hiệu suất theo sản phẩm & Nghiên cứu */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
-        <div className="lg:col-span-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex flex-col">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-4 items-stretch">
+        <div className="lg:col-span-2 rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5 flex flex-col">
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
             <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
               Diễn biến số dư tài khoản
@@ -400,9 +402,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 lg:gap-4">
           {/* Hiệu suất theo sản phẩm */}
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5 flex-1">
+          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5 flex-1">
             <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
               Hiệu suất theo sản phẩm
             </h3>
@@ -442,7 +444,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
 
           {/* Tỷ lệ Lãi / Lỗ / Hòa vốn */}
-          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
+          <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
               Số lần Lãi / Lỗ / Hòa vốn
             </h3>
@@ -508,8 +510,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       </div>
 
       {/* Row 3: Lịch lãi / lỗ theo ngày */}
-      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-5">
-        <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9] mb-4">
+      <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-3.5 sm:p-5">
+        <h3 className="text-sm font-semibold text-[#1C1B18] dark:text-[#F2EFE9] mb-3 sm:mb-4 px-1 sm:px-0">
           Lịch giao dịch
         </h3>
         <MonthCalendar

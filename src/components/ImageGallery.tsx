@@ -228,7 +228,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ items, onAddFiles, o
               onClick={() => onRemove(item.key)}
               disabled={disabled}
               aria-label={`Xóa ảnh ${item.name}`}
-              className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white hover:bg-[#D92D20] disabled:opacity-50"
+              className="absolute right-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white hover:bg-[#D92D20] disabled:opacity-50 lg:h-7 lg:w-7"
             >
               <X className="h-4 w-4" />
             </button>
@@ -260,7 +260,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ items, onAddFiles, o
       </div>
 
       <p className="mt-2 text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
-        Ảnh JPEG, PNG, WebP, GIF · tối đa {MAX_IMAGES_PER_OWNER} ảnh · kéo thả hoặc dán ảnh (Ctrl+V) đều được
+        Ảnh JPEG, PNG, WebP, GIF · tối đa {MAX_IMAGES_PER_OWNER} ảnh
+        <span className="hidden lg:inline"> · kéo thả hoặc dán ảnh (Ctrl+V) đều được</span>
       </p>
       {error && (
         <p role="alert" className="mt-1 text-xs font-semibold text-loss">
