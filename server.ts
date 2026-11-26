@@ -121,10 +121,9 @@ const reviewResolveSchema = z.object({
   tradeId: z.string().nullable().default(null),
 });
 
+// Chỉ cho đổi tên hiển thị. Múi giờ không còn là cài đặt (xem src/lib/timezone.ts); trường thừa từ bản cũ bị bỏ qua.
 const accountUpdateSchema = z.object({
-  label: z.string().min(1),
-  serverTimezone: z.string().min(1),
-  displayTimezone: z.string().min(1),
+  label: z.string().trim().min(1).max(80),
 });
 
 function parseByMode(rawContent: string, mode: 'auto' | 'text' | 'html' | 'eml') {

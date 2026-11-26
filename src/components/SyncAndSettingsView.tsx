@@ -15,22 +15,15 @@ import { BottomSheet } from './ui/BottomSheet.tsx';
 import { StatGrid } from './ui/StatGrid.tsx';
 import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { usePagination } from '../hooks/usePagination.ts';
-import { normalizeServerTimezone } from '../lib/timezone.ts';
+import { formatVnDateTime } from '../lib/dateUtils.ts';
+import { formatUsd } from '../lib/format.ts';
+import { MT_AUTO_TIMEZONE, brokerRawToVietnamRaw } from '../lib/timezone.ts';
 import type { ParsedStatement, SyncLogRecord, WorkspaceDataset } from '../shared/types.ts';
 
 interface SyncAndSettingsViewProps {
   dataset: WorkspaceDataset;
   onRefreshWorkspace: () => Promise<void>;
 }
-
-// Giờ trong báo cáo là giờ máy chủ sàn; ứng dụng quy đổi sang giờ Việt Nam để hiển thị.
-const BROKER_TZ_OPTIONS = [
-  { value: 'MT-auto', label: 'Tự động — MetaTrader/Vantage (UTC+2 mùa Đông, UTC+3 mùa Hè)' },
-  { value: 'UTC+2', label: 'Cố định UTC+2' },
-  { value: 'UTC+3', label: 'Cố định UTC+3' },
-  { value: 'UTC+0', label: 'Cố định UTC+0 (GMT)' },
-  { value: 'UTC+7', label: 'UTC+7 (báo cáo đã là giờ Việt Nam, không quy đổi)' },
-];
 
 const LOG_PAGE_SIZE = 10;
 
@@ -135,12 +128,11 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
   const [parseBusy, setParseBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  // Account Timezone Settings
+  // Tên hiển thị của tài khoản
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
-  const [accountDrafts, setAccountDrafts] = useState<
-    Record<string, { label: string; serverTimezone: string; displayTimezone: string }>
-  >({});
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -270,21 +262,30 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
   const saveAccount = async (id: string) => {
     const acct = dataset.accounts.find((a) => a.id === id);
     if (!acct) return;
-    const draft = accountDrafts[id] ?? {
-      label: acct.label,
-      serverTimezone: normalizeServerTimezone(acct.serverTimezone),
-      displayTimezone: 'Asia/Ho_Chi_Minh',
-    };
-    setSavingId(id);
+    const label = (labelDrafts[id] ?? acct.label).trim();
     setSavedBanner(null);
+    setAccountError(null);
+    if (!label) {
+      setAccountError('Tên tài khoản không được để trống.');
+      return;
+    }
+    setSavingId(id);
     try {
-      await fetch(`/api/accounts/${id}`, {
+      const res = await fetch(`/api/accounts/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ label }),
       });
+      if (!res.ok) throw new Error('save failed');
       await onRefreshWorkspace();
-      setSavedBanner(`Đã lưu cấu hình múi giờ cho tài khoản ${acct.accountNumber}.`);
+      setLabelDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setSavedBanner(`Đã lưu tên tài khoản ${acct.accountNumber}.`);
+    } catch {
+      setAccountError('Không lưu được tên tài khoản. Hãy thử lại.');
     } finally {
       setSavingId(null);
     }
@@ -367,7 +368,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                   </div>
                   <span className="text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
                     Lần gần nhất:{' '}
-                    {lastGmailSync ? new Date(lastGmailSync.createdAt).toLocaleString('vi-VN') : '—'}
+                    {lastGmailSync ? formatVnDateTime(lastGmailSync.createdAt) : '—'}
                   </span>
                 </div>
 
@@ -561,7 +562,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                 </p>
               </div>
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
-                <span className="text-[#55534D] dark:text-[#C2BFB6]">Thời gian báo cáo</span>
+                <span className="text-[#55534D] dark:text-[#C2BFB6]">Thời gian báo cáo (giờ sàn)</span>
                 <p className="mt-1 font-mono-num font-semibold">
                   {previewStatement.header.reportTimestampRaw || '—'}
                 </p>
@@ -575,7 +576,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3 border border-[#E7E5E0] dark:border-[#32302B]">
                 <span className="text-[#55534D] dark:text-[#C2BFB6]">Closed P/L → Balance</span>
                 <p className="mt-1 font-mono-num font-semibold">
-                  {previewStatement.summary.closedTradePL} → ${previewStatement.summary.balance}
+                  {formatUsd(previewStatement.summary.closedTradePL)} → {formatUsd(previewStatement.summary.balance, false)}
                 </p>
               </div>
             </div>
@@ -586,7 +587,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
       {/* 2. Timezone & Storage Status + Export / PWA */}
       <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E7E5E0] dark:border-[#32302B]">
-          <h3 className="text-sm font-semibold">Cài đặt tài khoản & Lưu trữ</h3>
+          <h3 className="text-sm font-semibold">Tài khoản & Lưu trữ</h3>
           <div className="inline-flex items-center gap-1.5 text-xs font-medium shrink-0">
             <Database className="w-3.5 h-3.5 text-[#C96442]" />
             <span className={dataset.dbConnected ? 'text-win' : 'text-[#55534D] dark:text-[#C2BFB6]'}>
@@ -600,62 +601,35 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
             {savedBanner}
           </div>
         )}
+        {accountError && (
+          <div
+            role="alert"
+            className="rounded-lg border border-[color:var(--pnl-loss-line)] bg-[color:var(--pnl-loss-soft)] px-3 py-2 text-xs text-loss"
+          >
+            {accountError}
+          </div>
+        )}
 
         {dataset.accounts.length > 0 ? (
           <div className="space-y-3">
             {dataset.accounts.map((a) => {
-              const draft = accountDrafts[a.id] ?? {
-                label: a.label,
-                serverTimezone: normalizeServerTimezone(a.serverTimezone),
-                displayTimezone: 'Asia/Ho_Chi_Minh',
-              };
+              const label = labelDrafts[a.id] ?? a.label;
               return (
                 <div
                   key={a.id}
-                  className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
+                  className="rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#FAF9F5] dark:bg-[#181715] p-4 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end"
                 >
                   <div>
-                    <label className="block text-xs font-medium mb-1">
+                    <label htmlFor={`acct-label-${a.id}`} className="block text-xs font-medium mb-1">
                       Tên tài khoản (TK {a.accountNumber} · {a.currency})
                     </label>
                     <input
+                      id={`acct-label-${a.id}`}
                       type="text"
-                      value={draft.label}
-                      onChange={(e) =>
-                        setAccountDrafts((p) => ({
-                          ...p,
-                          [a.id]: { ...draft, label: e.target.value },
-                        }))
-                      }
+                      value={label}
+                      maxLength={80}
+                      onChange={(e) => setLabelDrafts((p) => ({ ...p, [a.id]: e.target.value }))}
                       className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-2 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Múi giờ máy chủ sàn</label>
-                    <select
-                      value={draft.serverTimezone}
-                      onChange={(e) =>
-                        setAccountDrafts((p) => ({
-                          ...p,
-                          [a.id]: { ...draft, serverTimezone: e.target.value },
-                        }))
-                      }
-                      className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] px-3 py-2 text-xs"
-                    >
-                      {BROKER_TZ_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Múi giờ hiển thị (cố định)</label>
-                    <input
-                      type="text"
-                      value="Giờ Việt Nam (UTC+7)"
-                      readOnly
-                      className="w-full rounded-lg border border-[#E7E5E0] dark:border-[#32302B] bg-[#F3F1EC] dark:bg-[#181715] px-3 py-2 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]"
                     />
                   </div>
                   <button
@@ -664,7 +638,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                     onClick={() => saveAccount(a.id)}
                     className="rounded-lg bg-[#1C1B18] dark:bg-[#F2EFE9] text-white dark:text-[#1C1B18] px-4 py-2 text-xs font-medium min-h-[44px] md:min-h-[38px] disabled:opacity-60"
                   >
-                    {savingId === a.id ? 'Đang lưu...' : 'Lưu cài đặt'}
+                    {savingId === a.id ? 'Đang lưu...' : 'Lưu tên'}
                   </button>
                 </div>
               );
@@ -681,12 +655,12 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
               onClick={() =>
                 downloadCsv(
                   'lich-su-giao-dich.csv',
-                  ['Ma', 'Chieu', 'Mo', 'Dong', 'KhoiLuong', 'GiaVao', 'GiaRa', 'NetPL', 'ChienLuoc'],
+                  ['Ma', 'Chieu', 'Mo (gio VN)', 'Dong (gio VN)', 'KhoiLuong', 'GiaVao', 'GiaRa', 'NetPL (USD)', 'ChienLuoc'],
                   dataset.trades.map((t) => [
                     t.symbol,
                     t.side,
-                    t.openTimeRaw,
-                    t.closeTimeRaw ?? '',
+                    brokerRawToVietnamRaw(t.openTimeRaw, MT_AUTO_TIMEZONE),
+                    brokerRawToVietnamRaw(t.closeTimeRaw, MT_AUTO_TIMEZONE) ?? '',
                     t.volume,
                     t.entryPrice,
                     t.exitPrice ?? '',
@@ -783,12 +757,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                             {l.accountNumber ? ` · TK ${l.accountNumber}` : ''}
                           </span>
                           <span className="shrink-0 font-mono-num text-[11px] text-[#55534D] dark:text-[#C2BFB6]">
-                            {new Date(l.createdAt).toLocaleString('vi-VN', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {formatVnDateTime(l.createdAt, { compact: true })}
                           </span>
                         </span>
                         <span className={`block text-xs font-semibold ${meta.className}`}>{meta.label}</span>
@@ -820,7 +789,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                 <th className="py-2 pr-3 font-semibold text-left">Thời điểm</th>
                 <th className="py-2 px-3 font-semibold text-left">Nguồn</th>
                 <th className="py-2 px-3 font-semibold text-left">Tài khoản</th>
-                <th className="py-2 px-3 font-semibold text-left">Báo cáo gốc</th>
+                <th className="py-2 px-3 font-semibold text-left">Báo cáo (giờ sàn)</th>
                 <th className="py-2 px-3 font-semibold text-left">Trạng thái</th>
                 <th className="py-2 pl-3 font-semibold text-left">Ghi chú</th>
               </tr>
@@ -831,7 +800,7 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
                 return (
                   <tr key={l.id} className="align-top">
                     <td className="py-2.5 pr-3 text-left font-mono-num text-[#55534D] dark:text-[#C2BFB6] whitespace-nowrap">
-                      {new Date(l.createdAt).toLocaleString('vi-VN')}
+                      {formatVnDateTime(l.createdAt)}
                     </td>
                     <td className="py-2.5 px-3 text-left font-semibold">{LOG_SOURCE_LABELS[l.source] ?? l.source}</td>
                     <td className="py-2.5 px-3 text-left font-mono-num">{l.accountNumber ?? '—'}</td>
@@ -872,14 +841,14 @@ export const SyncAndSettingsView: React.FC<SyncAndSettingsViewProps> = ({
           open
           onClose={() => setLogDetail(null)}
           title="Chi tiết đồng bộ"
-          subtitle={new Date(logDetail.createdAt).toLocaleString('vi-VN')}
+          subtitle={formatVnDateTime(logDetail.createdAt)}
         >
           <div className="space-y-3 pt-1">
             <StatGrid
               items={[
                 { label: 'Nguồn', value: LOG_SOURCE_LABELS[logDetail.source] ?? logDetail.source },
                 { label: 'Tài khoản', value: logDetail.accountNumber ?? '—' },
-                { label: 'Báo cáo gốc', value: logDetail.reportTimestampRaw ?? '—', wide: true },
+                { label: 'Báo cáo (giờ sàn)', value: logDetail.reportTimestampRaw ?? '—', wide: true },
                 {
                   label: 'Trạng thái',
                   value: (LOG_STATUS_META[logDetail.status] ?? { label: logDetail.status }).label,

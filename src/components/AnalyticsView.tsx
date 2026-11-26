@@ -9,25 +9,22 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertTriangle, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { BottomSheet } from './ui/BottomSheet.tsx';
 import { SegmentedControl } from './ui/controls.tsx';
 import { useIsDark } from '../hooks/useIsDark.ts';
 import { useIsMobile } from '../hooks/useMediaQuery.ts';
+import { formatAxisUsd, formatUsd } from '../lib/format.ts';
 import { chartColors, chartTooltipProps } from '../lib/pnl.ts';
 import type { MetricsSummary } from '../shared/types.ts';
 
 interface AnalyticsViewProps {
   metrics: MetricsSummary;
-  onNavigateSettings?: () => void;
 }
 
 function formatMoney(val: string | number | null): string {
   if (val === null) return 'Chưa có';
-  const num = typeof val === 'string' ? Number(val) : val;
-  if (Number.isNaN(num)) return '$0.00';
-  const sign = num > 0 ? '+' : num < 0 ? '-' : '';
-  return `${sign}$${Math.abs(num).toFixed(2)}`;
+  return formatUsd(val);
 }
 
 const PREVIEW_ROWS = 6;
@@ -61,7 +58,6 @@ const LIST_CLASS = 'divide-y divide-[#E7E5E0]/70 dark:divide-[#32302B]/70';
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   metrics,
-  onNavigateSettings,
 }) => {
   const [timeScale, setTimeScale] = useState<'day' | 'week' | 'month'>('day');
   const [showAllPeriods, setShowAllPeriods] = useState(false);
@@ -121,7 +117,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             {metrics.expectancy !== null ? `${formatMoney(metrics.expectancy)}/lệnh` : 'Chưa đủ mẫu'}
           </p>
           <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-            Lãi gộp +${metrics.grossProfit} · Lỗ gộp -${metrics.grossLoss}
+            Lãi gộp {formatUsd(metrics.grossProfit)} · Lỗ gộp {formatUsd(-Number(metrics.grossLoss))}
           </p>
         </div>
 
@@ -129,11 +125,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <p className="text-xs text-[#55534D] dark:text-[#C2BFB6]">Lãi TB / Lỗ TB mỗi lệnh</p>
           <p className="mt-1.5 text-lg lg:text-xl font-semibold font-mono-num">
             <span className="text-win">
-              {metrics.averageWin ? `+$${metrics.averageWin}` : '—'}
+              {metrics.averageWin !== null ? formatUsd(metrics.averageWin) : '—'}
             </span>
             <span className="mx-1.5 text-[#55534D]">/</span>
             <span className="text-loss">
-              {metrics.averageLoss ? `-$${metrics.averageLoss}` : '—'}
+              {metrics.averageLoss !== null ? formatUsd(-Number(metrics.averageLoss)) : '—'}
             </span>
           </p>
         </div>
@@ -154,7 +150,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             {formatMoney(Number(metrics.totalCommission) + Number(metrics.totalSwap))}
           </p>
           <p className="mt-1 text-xs font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-            Comm {metrics.totalCommission} · Swap {metrics.totalSwap}
+            Comm {formatUsd(metrics.totalCommission, false)} · Swap {formatUsd(metrics.totalSwap, false)}
           </p>
         </div>
       </div>
@@ -204,11 +200,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <BarChart data={symbolChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,115,105,0.18)" vertical={false} />
                   <XAxis dataKey="symbol" tick={{ fontSize: 12, fill: colors.axis }} axisLine={false} tickLine={false} />
-                  <YAxis tick={axisTick} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                  <YAxis tick={axisTick} axisLine={false} tickLine={false} tickFormatter={(v) => formatAxisUsd(v)} />
                   <Tooltip
                     {...tooltip}
                     cursor={{ fill: colors.barCursor }}
-                    formatter={(v: unknown) => [`$${Number(v).toFixed(2)}`, 'Net P/L']}
+                    formatter={(v: unknown) => [formatUsd(Number(v)), 'Net P/L']}
                   />
                   <Bar dataKey="netPL" radius={[6, 6, 0, 0]}>
                     {symbolChartData.map((entry) => (
@@ -414,51 +410,33 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         {/* Session Breakdown */}
         <div className="rounded-xl border border-[#E7E5E0] dark:border-[#32302B] bg-white dark:bg-[#22211E] p-4 sm:p-5">
           <h3 className="text-sm font-semibold mb-1">Hiệu suất theo Phiên (Á / Âu / Mỹ)</h3>
-          {!metrics.sessionAnalysisAvailable ? (
-            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/25 p-3 text-xs space-y-2">
-              <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{metrics.sessionWarning}</span>
-              </div>
-              {onNavigateSettings && (
-                <button
-                  type="button"
-                  onClick={onNavigateSettings}
-                  className="text-xs font-medium text-[#C96442] underline underline-offset-4"
-                >
-                  Cấu hình múi giờ sàn trong Cài đặt
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="mt-3 space-y-2 text-xs">
-              {metrics.bySession.map((s) => (
-                <div
-                  key={s.session}
-                  className="flex items-center justify-between py-2 border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70 last:border-none"
-                >
-                  <div>
-                    <div className="font-medium">{s.session}</div>
-                    <div className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
-                      n={s.trades} · Win {s.winRate}%
-                    </div>
+          <div className="mt-3 space-y-2 text-xs">
+            {metrics.bySession.map((s) => (
+              <div
+                key={s.session}
+                className="flex items-center justify-between py-2 border-b border-[#E7E5E0]/70 dark:border-[#32302B]/70 last:border-none"
+              >
+                <div>
+                  <div className="font-medium">{s.session}</div>
+                  <div className="font-mono-num text-[#55534D] dark:text-[#C2BFB6]">
+                    n={s.trades} · Win {s.winRate}%
                   </div>
-                  <span
-                    className={`font-mono-num font-semibold ${
-                      Number(s.netPL) >= 0
-                        ? 'text-win'
-                        : 'text-loss'
-                    }`}
-                  >
-                    {formatMoney(s.netPL)}
-                  </span>
                 </div>
-              ))}
-              {metrics.bySession.length === 0 && (
-                <p className="text-[#55534D] py-4">Chưa có lệnh trong bộ lọc.</p>
-              )}
-            </div>
-          )}
+                <span
+                  className={`font-mono-num font-semibold ${
+                    Number(s.netPL) >= 0
+                      ? 'text-win'
+                      : 'text-loss'
+                  }`}
+                >
+                  {formatMoney(s.netPL)}
+                </span>
+              </div>
+            ))}
+            {metrics.bySession.length === 0 && (
+              <p className="text-[#55534D] py-4">Chưa có lệnh trong bộ lọc.</p>
+            )}
+          </div>
         </div>
 
         {/* By Strategy */}
@@ -539,7 +517,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div className="rounded-lg bg-[#FAF9F5] dark:bg-[#181715] p-3.5 border border-[#E7E5E0] dark:border-[#32302B]">
             <p className="font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">Max Drawdown ngày</p>
             <p className="mt-1 font-mono-num font-semibold text-[#1C1B18] dark:text-[#F2EFE9]">
-              -${metrics.maxObservedDailyDrawdown}
+              {formatUsd(-Number(metrics.maxObservedDailyDrawdown))}
               {metrics.maxObservedDailyDrawdownPct !== null
                 ? ` (${metrics.maxObservedDailyDrawdownPct}%)`
                 : ''}

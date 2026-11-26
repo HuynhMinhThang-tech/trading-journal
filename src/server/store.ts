@@ -21,6 +21,7 @@ import type {
   WorkspaceDataset,
 } from '../shared/types.ts';
 import { MAX_IMAGES_PER_OWNER } from '../shared/attachments.ts';
+import { MT_AUTO_TIMEZONE } from '../lib/timezone.ts';
 import { matchDealsToTrades, type DealWithAccount } from '../lib/trading/tradeMatcher.ts';
 import * as schema from './schema.ts';
 
@@ -311,8 +312,9 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
       label: a.label,
       accountNumber: a.accountNumber,
       currency: a.currency,
-      serverTimezone: a.serverTimezone,
-      displayTimezone: a.displayTimezone,
+      // Múi giờ không còn là cài đặt: mọi tài khoản dùng quy tắc MetaTrader (bỏ qua giá trị cũ như 'UTC+7' trong DB).
+      serverTimezone: MT_AUTO_TIMEZONE,
+      displayTimezone: 'Asia/Ho_Chi_Minh',
       createdAt: a.createdAt.toISOString(),
     }));
 
@@ -581,7 +583,7 @@ export async function getWorkspaceDataset(): Promise<WorkspaceDataset> {
 
   return {
     dbConnected: false,
-    accounts: [...mem.accounts],
+    accounts: mem.accounts.map((a) => ({ ...a, serverTimezone: MT_AUTO_TIMEZONE, displayTimezone: 'Asia/Ho_Chi_Minh' })),
     imports: [...mem.imports].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     orders: [...mem.orders].sort((a, b) => b.openTimeRaw.localeCompare(a.openTimeRaw)),
     deals: [...mem.deals].sort((a, b) => b.timeRaw.localeCompare(a.timeRaw)),
@@ -1241,21 +1243,16 @@ export async function resolveReviewItem(
   });
 }
 
-export async function updateTradingAccount(
-  accountId: string,
-  updates: { label: string; serverTimezone: string; displayTimezone: string },
-): Promise<void> {
+export async function updateTradingAccount(accountId: string, updates: { label: string }): Promise<void> {
   if (dbReady && db) {
     await db
       .update(schema.tradingAccounts)
-      .set(updates)
+      .set({ label: updates.label })
       .where(eq(schema.tradingAccounts.id, accountId));
     return;
   }
   const acct = mem.accounts.find((a) => a.id === accountId);
   if (acct) {
     acct.label = updates.label;
-    acct.serverTimezone = updates.serverTimezone;
-    acct.displayTimezone = updates.displayTimezone;
   }
 }

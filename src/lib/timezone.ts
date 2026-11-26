@@ -5,6 +5,10 @@
 // giờ mùa hè của Mỹ). Vì vậy cần quy đổi trước khi hiển thị hoặc gom theo ngày.
 //
 // Mọi phép tính dùng "giờ treo tường" (Date.UTC làm mốc) để không phụ thuộc múi giờ của trình duyệt/máy chủ.
+//
+// Quy tắc quy đổi là CỐ ĐỊNH (MT-auto), không còn cho người dùng chọn: báo cáo của Vantage luôn theo giờ máy chủ
+// MetaTrader. Trước đây có ô "Múi giờ máy chủ sàn" trong Cài đặt; chọn nhầm "UTC+7" làm app hiểu giờ sàn đã là
+// giờ Việt Nam nên không cộng bù 4–5 tiếng, khiến giờ lệnh hiển thị sai. Ô đó đã được gỡ bỏ.
 
 import type { WorkspaceDataset } from '../shared/types.ts';
 
@@ -102,20 +106,18 @@ export function startOfYesterdayVnEpochSeconds(nowMs: number = Date.now()): numb
  * (nhật ký, lịch, bộ lọc ngày, thống kê theo ngày/phiên) để ngày và giờ luôn khớp nhau.
  *
  * Lưu ý: trong bản sao này `openTimeRaw`/`closeTimeRaw` đã là giờ Việt Nam, nên `serverTimezone` của
- * tài khoản được đặt thành 'UTC+7' để không bị quy đổi lần thứ hai. Màn hình Cài đặt phải dùng dataset gốc.
+ * tài khoản được đặt thành 'UTC+7' để không bị quy đổi lần thứ hai (chỉ là cờ nội bộ cho bộ tính chỉ số,
+ * không phải cài đặt của người dùng).
  */
 export function toVietnamTimeDataset(dataset: WorkspaceDataset): WorkspaceDataset {
-  const tzByAccount = new Map(dataset.accounts.map((a) => [a.id, a.serverTimezone]));
   return {
     ...dataset,
     accounts: dataset.accounts.map((a) => ({ ...a, serverTimezone: 'UTC+7', displayTimezone: 'Asia/Ho_Chi_Minh' })),
-    trades: dataset.trades.map((t) => {
-      const tz = tzByAccount.get(t.accountId);
-      return {
-        ...t,
-        openTimeRaw: brokerRawToVietnamRaw(t.openTimeRaw, tz),
-        closeTimeRaw: brokerRawToVietnamRaw(t.closeTimeRaw, tz),
-      };
-    }),
+    trades: dataset.trades.map((t) => ({
+      ...t,
+      // Luôn quy đổi theo quy tắc MetaTrader, bất kể giá trị cũ đang lưu trong cơ sở dữ liệu.
+      openTimeRaw: brokerRawToVietnamRaw(t.openTimeRaw, MT_AUTO_TIMEZONE),
+      closeTimeRaw: brokerRawToVietnamRaw(t.closeTimeRaw, MT_AUTO_TIMEZONE),
+    })),
   };
 }

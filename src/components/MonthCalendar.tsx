@@ -5,6 +5,7 @@ import {
   buildMonthGrid,
   monthLabel,
   todayIso,
+  vietnamYearMonth,
 } from '../lib/dateUtils.ts';
 
 export type CalendarTone = 'win' | 'loss' | 'neutral' | 'accent';
@@ -52,8 +53,8 @@ export const MonthCalendar: React.FC<MonthCalendarProps> = ({
   };
 
   const goToday = () => {
-    const now = new Date();
-    onMonthChange(now.getFullYear(), now.getMonth());
+    const now = vietnamYearMonth();
+    onMonthChange(now.year, now.month);
   };
 
   return (

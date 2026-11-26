@@ -28,8 +28,9 @@ import {
   formatIsoShort,
   isoFromRaw,
   todayIso,
+  vietnamYearMonth,
 } from '../lib/dateUtils.ts';
-import { formatCompactMoney, formatUsd } from '../lib/format.ts';
+import { formatAxisUsd, formatCompactMoney, formatUsd } from '../lib/format.ts';
 import { chartColors, chartTooltipProps, pnlBarClass, pnlTextClass } from '../lib/pnl.ts';
 import type {
   AccountSnapshotRecord,
@@ -133,9 +134,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   const isDark = useIsDark();
   const colors = chartColors(isDark);
 
-  const now = new Date();
-  const [calYear, setCalYear] = useState(now.getFullYear());
-  const [calMonth, setCalMonth] = useState(now.getMonth());
+  const initialMonth = vietnamYearMonth();
+  const [calYear, setCalYear] = useState(initialMonth.year);
+  const [calMonth, setCalMonth] = useState(initialMonth.month);
 
   const maxAbsSymbolPL = useMemo(() => {
     if (metrics.bySymbol.length === 0) return 1;
@@ -371,8 +372,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     axisLine={false}
                     tickLine={false}
                     domain={['auto', 'auto']}
-                    tickFormatter={(v) => `$${v}`}
-                    width={52}
+                    tickFormatter={(v) => formatAxisUsd(v)}
+                    width={60}
                   />
                   <Tooltip
                     {...chartTooltipProps(colors)}

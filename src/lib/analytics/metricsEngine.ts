@@ -5,7 +5,7 @@ import type {
   TradeRecord,
   TradingAccountRecord,
 } from '../../shared/types.ts';
-import { brokerRawToVietnamRaw, serverUtcOffsetHours, vietnamHourFromBrokerRaw } from '../timezone.ts';
+import { brokerRawToVietnamRaw, vietnamHourFromBrokerRaw } from '../timezone.ts';
 
 function extractTradeDate(tsRaw: string): string {
   const m = tsRaw.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
@@ -71,7 +71,6 @@ export function calculateMetrics(
   const ambiguousTrades = trades.filter((t) => t.matchingStatus === 'ambiguous').length;
 
   const accountTzById = new Map(accounts.map((a) => [a.id, a.serverTimezone]));
-  const hasKnownServerTz = accounts.some((a) => serverUtcOffsetHours(a.serverTimezone, 0) !== null);
 
   let netPL = new Decimal(0);
   let grossProfit = new Decimal(0);
@@ -436,10 +435,9 @@ export function calculateMetrics(
     maxObservedDailyDrawdownPct: maxObservedDailyDDPct,
     rMultipleStatus: 'Chưa đủ dữ liệu (thiếu S/L ban đầu hoặc quy chuẩn hợp đồng)',
     maeMfeStatus: 'Chưa đủ dữ liệu (email cuối ngày không có dữ liệu giá theo phút)',
-    sessionAnalysisAvailable: hasKnownServerTz,
-    sessionWarning: hasKnownServerTz
-      ? null
-      : 'Chưa xác định múi giờ máy chủ sàn (Unknown). Hãy chọn múi giờ sàn trong Cài đặt (ví dụ UTC+2 hoặc UTC+3) để mở phân tích theo phiên Á/Âu/Mỹ chính xác.',
+    // Múi giờ sàn là quy tắc cố định (MT-auto) nên phân tích theo phiên luôn khả dụng.
+    sessionAnalysisAvailable: true,
+    sessionWarning: null,
     bySymbol,
     bySide,
     byDay,

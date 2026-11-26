@@ -467,10 +467,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'analytics' && (
-                <AnalyticsView
-                  metrics={filteredMetrics}
-                  onNavigateSettings={() => setActiveTab('sync_settings')}
-                />
+                <AnalyticsView metrics={filteredMetrics} />
               )}
               {activeTab === 'sync_settings' && (
                 <SyncAndSettingsView

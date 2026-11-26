@@ -17,6 +17,7 @@ import {
   SegmentedControl,
   SelectField,
 } from './ui/controls.tsx';
+import { useConfirm } from './ui/ConfirmDialog.tsx';
 import { StatGrid } from './ui/StatGrid.tsx';
 import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { usePagination } from '../hooks/usePagination.ts';
@@ -28,7 +29,7 @@ import {
   uploadAttachment,
   type PreparedImage,
 } from '../lib/attachments.ts';
-import { formatIsoDisplay, todayIso } from '../lib/dateUtils.ts';
+import { formatIsoDisplay, todayIso, vietnamYearMonth } from '../lib/dateUtils.ts';
 import { MAX_IMAGES_PER_OWNER } from '../shared/attachments.ts';
 import type { ImageAttachmentRecord, PriceObservation } from '../shared/types.ts';
 
@@ -84,21 +85,21 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   onUpdate,
   onDelete,
 }) => {
+  const confirm = useConfirm();
   const [search, setSearch] = useState('');
   const [symbolFilter, setSymbolFilter] = useState('ALL');
 
   // Chế độ xem: danh sách (bảng) hoặc lịch
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
-  const initialNow = new Date();
-  const [calYear, setCalYear] = useState(initialNow.getFullYear());
-  const [calMonth, setCalMonth] = useState(initialNow.getMonth());
+  const initialMonth = vietnamYearMonth();
+  const [calYear, setCalYear] = useState(initialMonth.year);
+  const [calMonth, setCalMonth] = useState(initialMonth.month);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayFilter, setDayFilter] = useState<string | null>(null);
 
   const isMobile = useIsMobile();
   // Điện thoại: quan sát đang mở trong panel chi tiết, và bước xác nhận xóa
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -296,8 +297,17 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
     if (problems.length > 0) setImageError(problems.join(' '));
   };
 
-  const removeFormImage = (key: string) => {
+  const removeFormImage = async (key: string) => {
     setImageError(null);
+    // Ảnh đã lưu: hỏi lại trước khi đánh dấu xóa. Ảnh vừa chọn (chưa tải lên) bỏ ngay được vì chưa mất gì.
+    if (!key.startsWith('pending:')) {
+      const ok = await confirm({
+        title: 'Xóa ảnh này?',
+        message: 'Ảnh sẽ bị xóa khỏi quan sát khi bạn bấm Lưu. Bấm Hủy ở form để giữ lại.',
+        confirmLabel: 'Xóa ảnh',
+      });
+      if (!ok) return;
+    }
     if (key.startsWith('pending:')) {
       const pendingKey = key.slice('pending:'.length);
       setPendingImages((prev) => {
@@ -491,14 +501,23 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
   // ---------------------------------------------------------------------------------------------
   const closeDetail = () => {
     setDetailId(null);
-    setConfirmDelete(false);
   };
 
-  const handleDelete = async (id: string) => {
+  // Xóa quan sát (dùng chung cho bảng máy tính, danh sách và panel chi tiết trên điện thoại): luôn hỏi xác nhận.
+  const requestDelete = async (obs: PriceObservation) => {
+    const photoCount = imagesByObservation.get(obs.id)?.length ?? 0;
+    const ok = await confirm({
+      title: 'Xóa quan sát này?',
+      message: `${obs.symbol} · ${formatIsoDisplay(obs.observedDate)}${
+        photoCount > 0 ? `. ${photoCount} ảnh đính kèm cũng sẽ bị xóa.` : '.'
+      } Không thể khôi phục.`,
+      confirmLabel: 'Xóa quan sát',
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
-      await onDelete(id);
-      closeDetail();
+      await onDelete(obs.id);
+      if (detailId === obs.id) closeDetail();
     } finally {
       setDeleting(false);
     }
@@ -562,35 +581,21 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
       title={detailObs.symbol}
       subtitle={formatIsoDisplay(detailObs.observedDate)}
       footer={
-        confirmDelete ? (
-          <div>
-            <p className="mb-2.5 text-center text-sm font-semibold">Xóa quan sát này? Ảnh đính kèm cũng sẽ bị xóa.</p>
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setConfirmDelete(false)} className={`${BTN_SECONDARY} flex-1`}>
-                Giữ lại
-              </button>
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={() => void handleDelete(detailObs.id)}
-                className={`${BTN_DANGER} flex-1 !bg-[color:var(--pnl-loss-soft)]`}
-              >
-                <Trash2 className="h-4 w-4" />
-                {deleting ? 'Đang xóa...' : 'Xóa'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-3">
-            <button type="button" onClick={() => setConfirmDelete(true)} className={BTN_DANGER} aria-label="Xóa quan sát">
-              <Trash2 className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => openEditModal(detailObs)} className={`${BTN_PRIMARY} flex-1`}>
-              <Edit3 className="h-4 w-4" />
-              Chỉnh sửa
-            </button>
-          </div>
-        )
+        <div className="flex gap-3">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => void requestDelete(detailObs)}
+            className={BTN_DANGER}
+            aria-label="Xóa quan sát"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => openEditModal(detailObs)} className={`${BTN_PRIMARY} flex-1`}>
+            <Edit3 className="h-4 w-4" />
+            Chỉnh sửa
+          </button>
+        </div>
       }
     >
       <div className="space-y-3 pt-1">
@@ -994,7 +999,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onDelete(o.id)}
+                        onClick={() => void requestDelete(o)}
                         className="p-2 rounded-lg text-[#55534D] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                         aria-label="Xóa quan sát"
                       >
@@ -1125,7 +1130,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => onDelete(o.id)}
+                            onClick={() => void requestDelete(o)}
                             className="p-2 rounded-lg text-[#55534D] hover:text-loss hover:bg-[#F3F1EC] dark:hover:bg-[#2A2925]"
                             aria-label="Xóa quan sát"
                           >

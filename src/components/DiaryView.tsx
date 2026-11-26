@@ -12,6 +12,7 @@ import {
   FIELD_BASE,
   SearchField,
 } from './ui/controls.tsx';
+import { useConfirm } from './ui/ConfirmDialog.tsx';
 import { StatGrid } from './ui/StatGrid.tsx';
 import { useIsMobile } from '../hooks/useMediaQuery.ts';
 import { usePagination } from '../hooks/usePagination.ts';
@@ -142,6 +143,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   onAttachmentAdded,
   onAttachmentRemoved,
 }) => {
+  const confirm = useConfirm();
   const [noteFilter, setNoteFilter] = useState<'all' | 'documented' | 'missing'>('all');
   const [sideFilter, setSideFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [search, setSearch] = useState('');
@@ -202,7 +204,12 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   };
 
   const removeImage = async (tradeId: string, attachmentId: string) => {
-    if (typeof window.confirm === 'function' && !window.confirm('Xóa ảnh này khỏi nhật ký?')) return;
+    const ok = await confirm({
+      title: 'Xóa ảnh này?',
+      message: 'Ảnh sẽ bị xóa khỏi nhật ký của lệnh này và không thể khôi phục.',
+      confirmLabel: 'Xóa ảnh',
+    });
+    if (!ok) return;
     setTradeImageError(tradeId, null);
     try {
       await deleteAttachment(attachmentId);
